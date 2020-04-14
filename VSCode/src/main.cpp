@@ -15,6 +15,7 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 #define CONFIG_BTN_PIN     10
 #define OK_BTN_PIN         12
 #define START_LED_PIN      7
+#define BUZZER             8
 
 //STEPPER CONFIGS
 
@@ -164,6 +165,22 @@ int cleanRead(byte pin)
   }
 }
 
+/**********************************************************************
+* Buzzer 
+**********************************************************************/
+void buzzer(int ms)
+{
+  Serial.println("Buzzing..");
+  tone(BUZZER, 1000); // Send 1KHz sound signal...
+  delay(1000);        // ...for 1 sec
+  noTone(BUZZER);     // Stop sound...
+  delay(1000);        // ...for 1sec
+  //digitalWrite(BUZZER, HIGH);
+  //delay(ms);
+  //digitalWrite(BUZZER, LOW);
+}
+
+
 
 //Reads the Volume Pot, maps the reading to the above limits and increments by set amount
 // uint16_t getVolume()
@@ -296,8 +313,11 @@ void zeroArm() {
   Serial.print("MAX STEPS: ");
   Serial.println(steps);
   digitalWrite(STEPPER_ENABLE, LOW); 
-  
+
+  //small buzz
+  buzzer(100);
 }
+
 
 /**********************************************************************
 * Set arm to last known VALID calibration position
@@ -971,8 +991,13 @@ void setup() {
   pinMode(LIMIT_SWITCH_PIN, INPUT_PULLUP);
   pinMode(START_BTN_PIN, INPUT_PULLUP);
   pinMode(START_LED_PIN, OUTPUT);
+  pinMode(BUZZER, OUTPUT);
   attachInterrupt(digitalPinToInterrupt(LIMIT_SWITCH_PIN), limitTriggered_ISR, FALLING);
   //attachInterrupt(digitalPinToInterrupt(START_BTN_PIN), startTriggered_ISR, FALLING);
+  
+  //TODO - set initial states
+  
+  
   lcdInit(); 
   clearLCD();
   mode = WAIT;
@@ -1124,6 +1149,7 @@ void loop() {
         mlConfig();
 
         //break out if hit bottom and calibration incomplete
+        //shouldn't happen but just in case
         if (limitActived && !calib_done){
           Serial.println("LIMIT!!!");
           limitActived = false;
