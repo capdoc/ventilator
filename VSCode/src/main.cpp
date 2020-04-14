@@ -4,6 +4,8 @@
 #include <LiquidCrystal_I2C.h>
 
 LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars and 4 line display
+//lcd refresh rate
+#define REFRESH_RATE 200
 
 #define DEBUG false
 
@@ -14,29 +16,41 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 #define OK_BTN_PIN         12
 #define START_LED_PIN      7
 
-//STEPPER CONFIG
+//STEPPER CONFIGS
+
+//enable pin
 #define STEPPER_ENABLE     4
+//direction pin
 #define STEPPER_DIR        5
+//step pin
 #define STEPPER_STEP       6
+//arm daow direction
 #define STEPPER_DIR_DOWN   LOW  
+//arm up direction
 #define STEPPER_DIR_UP     HIGH  
 
-// BAG CONFIG
+// steps for upper most limit of arm 
 #define BAG_UPPER_LIMIT   3600
-
+//max volume for breath
 #define MAX_BAG_VOLUME    1000 // = 1 Litre
+//mililitre increments to configure
 #define ML_INCREMENTS     50 // = 50 ml
+//number of array elements
 #define ML_ARRAY_INC      MAX_BAG_VOLUME/ML_INCREMENTS
 
 
 
 
 //POT CONFIG
-#define NUM_READS               10  // Number of reads from pot to stabalize
 #define VOLUME_POT              A0  // Amount to compress the AmbuBag 50ml -1L
 #define BREATHS_PER_MIN_POT     A1  // Duty cycle 6-30 per minute
 #define IE_RATION_POT           A2  // Ratio of Inspiratory to Expiratory time
 // #define INSPIRATORY_TIME_POT    A3  // Tweak Inspiratory time, ie time to compress bag
+
+//debounce for button
+#define BTN_DEBOUNCE_DELAY 20
+//debounce for pot
+#define POT_DEBOUNCE_DELAY 2
 
 
 #define VOLUME_MIN 150
@@ -52,25 +66,26 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 
 
 //calibration array for ml increments
+uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS] = {0}; //850-150=700     700/50 = 14 50mL increments
 int calib_arr[ML_ARRAY_INC]; 
 int calib_index = 0;
-boolean calib_done = false;
 
 // FLAGS
-boolean switchState = false;
+//boolean switchState = false;
 boolean okBtnFlag = false;
 boolean confBtnFlag = false;
 boolean lcd_dis = false;
 boolean limitActived = false; 
 boolean err_flag = true;
+boolean calib_done = false;
 
 
 
 volatile boolean startEnabled = false;
 volatile unsigned long lastStartPress = 0;
 
-int steps = 0;              // Current Postion of Stepper Motor
-int stepsUpperLimit = 3499; // Upper Limit of Stepper Motor <= should be configured and stored in EEPROM -- 3600 full bag but weight of arm limits at 3500 about 20ml compression under weight of arm, some slack on string.
+int steps = BAG_UPPER_LIMIT;              // Current Postion of Stepper Motor
+int stepsUpperLimit = BAG_UPPER_LIMIT; // Upper Limit of Stepper Motor <= should be configured and stored in EEPROM -- 3600 full bag but weight of arm limits at 3500 about 20ml compression under weight of arm, some slack on string.
 byte setupState = 0;        // State to store calibration and setup
 boolean lockEnabled = false;
 
@@ -133,19 +148,6 @@ void lcdInit()
   lcd.home ();                      // Go to the home location
 }
 
-// Read pot and average over 10 reads to smooth
-// int cleanRead(byte pin)
-// {
-//   int totalRead = 0;
-//   int numRead = 0;
-//   // read 10 analogReads from pot and average across
-//   while (numRead < NUM_READS) {
-//     totalRead += analogRead(pin);
-//     numRead++;
-//   }
-//   return totalRead/NUM_READS;
-// }
-
 
 
 /**********************************************************************
@@ -155,7 +157,7 @@ int cleanRead(byte pin)
 {
   while(true){
     int val = analogRead(pin);
-    delay(2);
+    delay(POT_DEBOUNCE_DELAY);
     if (val == analogRead(pin)){
       return val;
     }
@@ -207,13 +209,12 @@ void slowStep(int delayTime)
 /**********************************************************************
 * Handle any Button Presses - with Debounce
 **********************************************************************/
-#define DEBOUNCE_DELAY 20
+
 void handleBTN()
 {
   // Debounce config button return false
-  int confState = digitalRead(CONFIG_BTN_PIN);
-  if (confState == LOW) {
-    delay(DEBOUNCE_DELAY);
+  if (digitalRead(CONFIG_BTN_PIN) == LOW) {
+    delay(BTN_DEBOUNCE_DELAY);
     if (digitalRead(CONFIG_BTN_PIN) == LOW) {
       //Serial.println(confState);
       confBtnFlag = true;
@@ -221,9 +222,8 @@ void handleBTN()
   }
 
   // Debounce ok button return true
-  int okState = digitalRead(OK_BTN_PIN);
-  if (okState == LOW) {
-    delay(DEBOUNCE_DELAY);
+  if (digitalRead(OK_BTN_PIN) == LOW) {
+    delay(BTN_DEBOUNCE_DELAY);
     if (digitalRead(OK_BTN_PIN) == LOW) {
       //Serial.println(okState);
       okBtnFlag = true;
@@ -231,46 +231,10 @@ void handleBTN()
   }
 }
 
-/**********************************************************************
-* Handle any Button Presses wait for reesonse - with Debounce
-**********************************************************************/
-#define DEBOUNCE_DELAY 20
-char handleBTNWait()
-{
-  char ret;
-  while(true){
-    // Debounce config button return false
-    int confState = digitalRead(CONFIG_BTN_PIN);
-    if (confState == LOW) {
-      delay(DEBOUNCE_DELAY);
-      if (digitalRead(CONFIG_BTN_PIN) == LOW) {
-        //Serial.println(confState);
-        //confBtnFlag = true;
-        ret = 'c';
-        break;
-      }
-    }
-
-    // Debounce ok button return true
-    int okState = digitalRead(OK_BTN_PIN);
-    if (okState == LOW) {
-      delay(DEBOUNCE_DELAY);
-      if (digitalRead(OK_BTN_PIN) == LOW) {
-        //Serial.println(okState);
-        //okBtnFlag = true;
-        ret = 'o';
-        break;
-      }
-    }
-  }
-  return ret;
-}
-
 
 /**********************************************************************
 * Display lcd
 **********************************************************************/
-#define REFRESH_RATE 200
 //Display Calibration date on LCD at above refresh rate
 void displayPos (int value, boolean displaySteps = false, int pos = 0) 
 {
@@ -318,32 +282,42 @@ void zeroArm() {
   digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
   while(!limitActived) {
     slowStep(200);
+    //no need to decrement, possible unknown position
+    //steps--;
   }
   limitActived = false;
+  steps = 0;
   // Move arm to upper limit
-  int steps = 0;
   digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
-  while(steps <= BAG_UPPER_LIMIT) {  
+  while(steps < BAG_UPPER_LIMIT) {  
     slowStep(200);
     steps++;
   }
+  Serial.print("MAX STEPS: ");
+  Serial.println(steps);
   digitalWrite(STEPPER_ENABLE, LOW); 
   
 }
 
-//GLOBAL
-uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS] = {0}; //850-150=700     700/50 = 14 50mL increments
-//FUNCTION *********************************************************************************************************************************
-void resetToLast(uint16_t lastGoodVolume)
+/**********************************************************************
+* Set arm to last known VALID calibration position
+**********************************************************************/
+void resetToLast(int lastGoodVolume)
 {
-  while(steps < stepsUpperLimit){
-    slowStep(500);
-    steps++;
-  }
-  while(steps > stepsToVolume[lastGoodVolume]){
-    slowStep(500);
+  //first zero arm
+  zeroArm();
+
+  // Move arm down to switch 
+  digitalWrite(STEPPER_ENABLE, HIGH);
+  digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
+  while(steps > lastGoodVolume) {
+    slowStep(200);
+    //no need to decrement, possible unknown position
     steps--;
   }
+  //digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
+  digitalWrite(STEPPER_ENABLE, LOW);
+ 
 }
 //FUNCTION *********************************************************************************************************************************
 void findVolume(byte volumeIncrement)
@@ -730,8 +704,6 @@ void potConfig() {
 VOLUME CALIBRATION CONFIGURATION
 */
 void volConfig() {
-  // Number of steps motor must take to fully inflate bag
-  int steps;
   // Compress bag to get 0 point
   Serial.println(F("Compressing bag fully"));
   clearLCD();
@@ -741,6 +713,7 @@ void volConfig() {
   digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
   while(!limitActived){
       slowStep(400);
+      steps--;
   }
   limitActived = false;  
   lcd.setCursor(0,3);
@@ -766,14 +739,18 @@ void volConfig() {
   // Only inflate to upper limit as hardcoded
   Serial.println(okBtnFlag);
   while (steps < BAG_UPPER_LIMIT && !okBtnFlag) {
-    slowStep(600);
+    slowStep(400);
     steps++;
     handleBTN();
   }
   // OK button pushed
   okBtnFlag = false;
   digitalWrite(STEPPER_ENABLE, LOW);
+  
+  //set the NEW UPPER LIMIT
   stepsUpperLimit = steps;
+  
+  
   // Ok has been hit, check if retest is needed or proceed.
   // Write screen
   clearLCD();
@@ -820,7 +797,7 @@ void zeroPot() {
     
     //if ok pressed
     if (okBtnFlag){
-      Serial.println("WAITING for ZERO");
+      Serial.println("WAITING for ZERO...");
       //get pot reading
       int potVal = cleanRead(VOLUME_POT);
       Serial.print("Pot val: ");
@@ -828,7 +805,7 @@ void zeroPot() {
 
       //check if pot is actually set to zero
       if (potVal == 0){ 
-        Serial.println("Pot at zero");
+        Serial.println("Pot at zero.");
         
         //reset ok flag
         okBtnFlag = false;
@@ -850,7 +827,6 @@ ML CALLIBRATE CONFIGURATION
 void mlConfig(){
   int newVol = 0;
   int currentVol = 0;
-  int range_steps = 0;
   
   //Enable stepper
   digitalWrite(STEPPER_ENABLE, HIGH);
@@ -894,9 +870,9 @@ void mlConfig(){
           //Serial.println(i);
           //step
           slowStep(500);
-          steps++;
-          Serial.print("TOTAL STEPS: ");
-          Serial.println(steps);
+          steps--;
+          //Serial.print("TOTAL STEPS: ");
+          //Serial.println(steps);
         }
 
         //assign new value
@@ -906,6 +882,7 @@ void mlConfig(){
         if (limitActived){
           //mode = ERR;
           //err_flag = true;
+          //don't reset limit here
           break;
         }
       }
@@ -946,12 +923,15 @@ void mlConfig(){
         Serial.print(" ,");
       }
       
-      //handle 'CONF' pressed
+    //handle 'CONF' pressed
     }else if (confBtnFlag){
       // dont reset flag here!
       //confBtnFlag = false;
       //conf pressed, try again
       Serial.println("Returning....");
+      //disable stepper
+      digitalWrite(STEPPER_ENABLE, LOW);
+      //break;
     }
 
     //raise flag if we are at the end of the array
@@ -1005,7 +985,7 @@ void setup() {
 **********************************************************************/
 void loop() {
   if(limitActived){
-    Serial.println("Ready...");
+    //Serial.println("Ready...");
     limitActived = false;
   }
 
@@ -1024,6 +1004,8 @@ void loop() {
       lcd.print(F("                     "));
       lcd.setCursor (0, 2);
       lcd.print(F("Press OK when ready."));
+      
+      Serial.println("Ready...");
       
       //wait for system to be ready and ok press
       while(true){
@@ -1047,7 +1029,7 @@ void loop() {
 
       //increment mode to next state 
       mode = STANDBY;
-      switchState = true;  
+      lcd_dis = true;
       
       
       break;
@@ -1056,9 +1038,9 @@ void loop() {
     STANDBY MODE
     */
     case STANDBY:
-      Serial.println("Standby Mode");
-      if (switchState) {
-        switchState = false;
+      //Serial.println("Standby Mode");
+      if (lcd_dis) {
+        lcd_dis = false;
         standbyScreen();
       }
       // Wait for user input
@@ -1074,55 +1056,45 @@ void loop() {
 
     //*************IGNORING for now
     case POT_CONFIG:
-      Serial.println("Potentiometer Zeroing Mode");
-      
       /*
       CENTER POTENTIOMETER
       */
+      Serial.println("Potentiometer Zeroing Mode");
       //first config screen
       potConfig();
-
       //Manually set to zero, assume correct
       mode = VOL_CONFIG;
-
       break;
     
 
 
     //***********IGNORING for now
     case VOL_CONFIG:
-      Serial.println("Volume Config Mode");
       /*
       CALIBRATE VOLUME OF BAG
       */      
+      Serial.println("Volume Config Mode");
       volConfig();
-
       // Recalibrate bag volume if config pressed
       if (confBtnFlag) {
         confBtnFlag = false;
         limitActived = false;
         mode = ML_CONFIG;
       } 
-      
       // Ok to proceed
       if (okBtnFlag) {
         okBtnFlag = false;
       }
       Serial.println("volume conf finished");
-
-     
       break;
 
 
 
     case ML_CONFIG:
-      Serial.println("ML Config Mode.");
       /*
       CALLIBRATE ML
       */
-
-      //reset step counter
-      steps = 0;
+      Serial.println("ML Config Mode.");
 
       //reset arm
       zeroArm();
@@ -1137,7 +1109,7 @@ void loop() {
 
       //reset calibration index
       calib_index = 0;
-    
+  
       //while limit not reached      
       while (!calib_done && !limitActived){
         
@@ -1148,18 +1120,27 @@ void loop() {
         okBtnFlag = false;
         Serial.println("starting ML config");
         
-        //turn  pot until for 50 ml 
+        //turn pot until 50 ml 
         mlConfig();
 
         //break out if hit bottom and calibration incomplete
         if (limitActived && !calib_done){
-          break;
-        }else if(confBtnFlag){
-          //reset flag
-          confBtnFlag = false;
+          Serial.println("LIMIT!!!");
+          limitActived = false;
           break;
         }
-
+        
+        //if conf button pressed, incorrect calibration increment
+        if(confBtnFlag){
+          //reset flag
+          confBtnFlag = false;
+          
+          //return to last valid increment
+          resetToLast(calib_arr[calib_index-1]);
+        }
+        
+        //DONT KNOW WHY THIS IS HERE, but it needs to be...
+        limitActived = false;
       }
 
       break;
@@ -1181,7 +1162,7 @@ void loop() {
         lcd.print(F("Press START to start."));
         
         //reset calibration flag = CAREFUL!!
-        calib_done = false;
+        //calib_done = false;
         lcd_dis = false;
       }
 
