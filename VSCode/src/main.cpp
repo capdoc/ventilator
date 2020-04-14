@@ -60,7 +60,11 @@ boolean calib_done = false;
 boolean switchState = false;
 boolean okBtnFlag = false;
 boolean confBtnFlag = false;
-//boolean potZero = false;
+boolean lcd_dis = false;
+boolean limitActived = false; 
+boolean err_flag = true;
+
+
 
 volatile boolean startEnabled = false;
 volatile unsigned long lastStartPress = 0;
@@ -93,7 +97,6 @@ MODE mode;
 **********************************************************************/
 
 // ISR TO ALERT WHEN LIMIT IS HIT
-boolean limitActived = false; 
 void limitTriggered_ISR()
 {
   limitActived = true;
@@ -150,9 +153,13 @@ void lcdInit()
 **********************************************************************/
 int cleanRead(byte pin)
 {
-  analogRead(pin);
-  delay(2);
-  return analogRead(pin);
+  while(true){
+    int val = analogRead(pin);
+    delay(2);
+    if (val == analogRead(pin)){
+      return val;
+    }
+  }
 }
 
 
@@ -321,9 +328,7 @@ void zeroArm() {
     steps++;
   }
   digitalWrite(STEPPER_ENABLE, LOW); 
-  //increment mode to next state 
-  mode = STANDBY;
-  switchState = true;  
+  
 }
 
 //GLOBAL
@@ -802,7 +807,7 @@ void zeroPot() {
   clearLCD();
   lcd.print(F("*** ML increments ***"));
   lcd.setCursor (0, 1);
-  lcd.print(F("*** Turn VT fully ***"));
+  lcd.print(F("Turn VT fully"));
   lcd.setCursor (0, 2);
   lcd.print(F("anticlockwise."));
   lcd.setCursor (0, 3);
@@ -844,7 +849,7 @@ ML CALLIBRATE CONFIGURATION
 */
 void mlConfig(){
   int newVol = 0;
-  int currentVol = -1;
+  int currentVol = 0;
   int range_steps = 0;
   
   //Enable stepper
@@ -852,15 +857,8 @@ void mlConfig(){
   digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
 
   // Move arm down slowly using VT pot until 50ml water displaced and press ok, or limit switch hit
-  boolean lcd_dis = true;
+  lcd_dis = true;
   while (true) {
-    
-    //if reached the end break out
-    if (limitActived){
-      mode = ERR;
-      break;
-    }
-
     //display message once 
     if (lcd_dis){
       clearLCD();
@@ -874,80 +872,100 @@ void mlConfig(){
       lcd_dis = false;
     }
     
-    //get the new reading
-    newVol = cleanRead(VOLUME_POT);
-    
-    //compare the values 
-    if (newVol > currentVol) {
-      //Serial.println("Greater >>>>>");
-      //Serial.print("New pot val: ");
-      //Serial.println(newVol);
+    lcd_dis = true;
 
-      //get pot difference (amount to move)
-      int diff = (newVol - currentVol) * 3;
-
-      //relative steps
-      for (int i = 0; i < diff; i++){ 
-        //Serial.print("STEP: ");
-        //Serial.println(i);
-        //step
-        slowStep(500);
-        steps++;
-        //Serial.print("TOTAL STEPS: ");
-        //Serial.println(steps);
-      }
-
-      //assign new value
-      currentVol = newVol;
-
-    }
-
-    //handle ok pressed
-    handleBTN();
-    if (okBtnFlag){
-      okBtnFlag = false;
-      // confirm increment message
-      clearLCD();
-      lcd.print(F("*** ML increments ***"));
-      lcd.setCursor (0, 1);
-      lcd.print(F("Set 50 ml increment?"));
-      lcd.setCursor (0, 2);
-      lcd.print(F("OK=Yes, CONF=No"));
+    //get the pot reading and move arm if 'OK' not pressed
+    while(!okBtnFlag && !confBtnFlag){
+      //get the new reading
+      newVol = cleanRead(VOLUME_POT);
       
-      if (handleBTNWait() == 'o'){
-        //ok pressed, save array
-        Serial.println("SAVING!");
+      //compare the values 
+      if (newVol > currentVol) {
+        //Serial.println("Greater >>>>>");
+        //Serial.print("New pot val: ");
+        //Serial.println(newVol);
 
-        //save the step marker to array
-        calib_arr[calib_index] = (int)steps;
-        //increment index for
-        calib_index++;
+        //get pot difference (amount to move)
+        int diff = (newVol - currentVol) * 3;
 
-        //view array
-        //reset increment array
-        for (int i = 0; i < ML_ARRAY_INC; i++){
-          //show the value for each
-          Serial.print(calib_arr[i]);
-          Serial.print(" ,");
+        //relative steps
+        for (int i = 0; i < diff; i++){ 
+          //Serial.print("STEP: ");
+          //Serial.println(i);
+          //step
+          slowStep(500);
+          steps++;
+          Serial.print("TOTAL STEPS: ");
+          Serial.println(steps);
         }
 
-      }else{
-        //conf pressed, try again
-        Serial.println("Returning....");
-      }
+        //assign new value
+        currentVol = newVol;
 
-      //raise flag if we are at the end of the array
-        if(calib_index == ML_ARRAY_INC){
-          calib_done = true;
-          mode = READY;
+        //if reached the limit switch break out
+        if (limitActived){
+          //mode = ERR;
+          //err_flag = true;
           break;
         }
+      }
 
+      // display next step message if not done
+      if (lcd_dis){
+        clearLCD();
+        lcd.print(F("*** ML increments ***"));
+        lcd.setCursor (0, 1);
+        lcd.print(F("Set 50 ml increment?"));
+        lcd.setCursor (0, 2);
+        lcd.print(F("OK=Yes, CONF=No"));
+        lcd_dis = false;
+      }
 
-      //break;
+      //handle ok pressed
+      handleBTN();
     }
-    //reset flag
-    //okBtnFlag = false;
+    
+
+    //handle saving the value if 'OK' pressed
+    if (okBtnFlag){
+      //reset flag
+      okBtnFlag = false;       
+      
+      //ok pressed, save array
+      Serial.println("SAVING!");
+
+      //save the step marker to array
+      calib_arr[calib_index] = (int)steps;
+      //increment index for
+      calib_index++;
+
+      //view array
+      for (int i = 0; i < ML_ARRAY_INC; i++){
+        //show the value for each
+        Serial.print(calib_arr[i]);
+        Serial.print(" ,");
+      }
+      
+      //handle 'CONF' pressed
+    }else if (confBtnFlag){
+      // dont reset flag here!
+      //confBtnFlag = false;
+      //conf pressed, try again
+      Serial.println("Returning....");
+    }
+
+    //raise flag if we are at the end of the array
+    if(calib_index == ML_ARRAY_INC){
+      //calibration finished
+      calib_done = true;
+      //display next message
+      lcd_dis = true;
+      //enter ready mode
+      mode = READY;
+    }
+
+    //return to set ML_CONFIG
+    break;
   }
 
   //disable stepper
@@ -1026,6 +1044,10 @@ void loop() {
       //reset steps
       Serial.println("Reset Mode");
       zeroArm();
+
+      //increment mode to next state 
+      mode = STANDBY;
+      switchState = true;  
       
       
       break;
@@ -1086,7 +1108,7 @@ void loop() {
       if (okBtnFlag) {
         okBtnFlag = false;
       }
-      Serial.println("second conf finished");
+      Serial.println("volume conf finished");
 
      
       break;
@@ -1094,7 +1116,7 @@ void loop() {
 
 
     case ML_CONFIG:
-      Serial.println("ML Config Mode");
+      Serial.println("ML Config Mode.");
       /*
       CALLIBRATE ML
       */
@@ -1102,10 +1124,15 @@ void loop() {
       //reset step counter
       steps = 0;
 
-      //reset increment array
+      //reset arm
+      zeroArm();
+      limitActived = false;
+      
+      Serial.println("Resetting volume array.....");
+      //reset volume increment array
       for (int i = 0; i < ML_ARRAY_INC; i++){
         calib_arr[i] = (int)0;
-        Serial.println(i);
+        //Serial.println(i);
       }
 
       //reset calibration index
@@ -1120,10 +1147,19 @@ void loop() {
         // Ok to proceed
         okBtnFlag = false;
         Serial.println("starting ML config");
+        
         //turn  pot until for 50 ml 
         mlConfig();
-        
-        
+
+        //break out if hit bottom and calibration incomplete
+        if (limitActived && !calib_done){
+          break;
+        }else if(confBtnFlag){
+          //reset flag
+          confBtnFlag = false;
+          break;
+        }
+
       }
 
       break;
@@ -1131,13 +1167,35 @@ void loop() {
 
     case READY:
       Serial.println("Ready Mode");
+      
+      if(lcd_dis){
+        //zero arm position
+        zeroArm();
 
-      clearLCD();
-      lcd.print(F("*** CALIBRATED!!! ***"));
-      lcd.setCursor (0, 1);
-      lcd.print(F("                     "));
-      lcd.setCursor (0, 2);
-      lcd.print(F("Press START to start."));
+        //print message
+        clearLCD();
+        lcd.print(F("*** CALIBRATED!! ***"));
+        lcd.setCursor (0, 1);
+        lcd.print(F("                     "));
+        lcd.setCursor (0, 2);
+        lcd.print(F("Press START to start."));
+        
+        //reset calibration flag = CAREFUL!!
+        calib_done = false;
+        lcd_dis = false;
+      }
+
+      Serial.print("Array values: ");
+      //display the increment array
+      for (int i = 0; i < ML_ARRAY_INC; i++){
+        //show the value for each
+        Serial.print(calib_arr[i]);
+        Serial.print(" ,");
+      }
+      Serial.println();
+      Serial.println();
+
+      delay(1000);
 
       break;
 
@@ -1146,12 +1204,13 @@ void loop() {
     case RUNNING:
       Serial.println("Running Mode");
 
+      //breath();
+
       break;
 
 
 
     case ERR:
-      boolean err_flag = true;
       Serial.println("ERROR!!!!!");
       
       //zero arm and wait for reset
@@ -1168,16 +1227,5 @@ void loop() {
       Serial.println("default");
   }
 
-  delay(100);
-
-
-  
-
-  // if(lockEnabled == false){
-  //   handleSettings();
-  //   handleScreen();
-  // // }
-  // if(startEnabled == true){
-  //   breath();
-  // }
+  //delay(100);
 }
