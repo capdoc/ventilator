@@ -2,6 +2,7 @@
 
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <EEPROM.h>
 
 LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars and 4 line display
 //lcd refresh rate
@@ -67,7 +68,7 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 
 
 //calibration array for ml increments
-uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS] = {0}; //850-150=700     700/50 = 14 50mL increments
+// uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS] = {0}; //850-150=700     700/50 = 14 50mL increments
 int calib_arr[ML_ARRAY_INC];
 int calib_index = 0;
 
@@ -79,6 +80,43 @@ boolean lcd_dis = false;
 boolean limitActived = false;
 boolean err_flag = true;
 boolean calib_done = false;
+
+//*******************************EEPROM CONFIG EDIT************************************
+// Always give your config an id, useful to debug and when config layout changes
+#define CONFIG_VERSION 1
+
+//EEPROM STRUCT
+struct configStruct {
+  //ADD EVERYTHING HERE YOU WANT USERS TO BE ABLE TO CONFIGURE
+  //ie VOLUME_MAX, BAG_UPPER_LIMIT, etc. 
+  uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS];
+  uint8_t version; // Placed last to verify you wrote/read correctly
+} config = {
+  //Set defaults
+  {0},
+  CONFIG_VERSION
+};
+
+void saveConfig() 
+{
+  for (uint8_t t=0; t<sizeof(config); t++) {
+    EEPROM.write(t, *((char*)&config + t));
+  }
+}
+
+void loadConfig() 
+{
+  // To make sure there are settings, and they are YOURS!
+  // If nothing is found it will use the default settings.
+  if (EEPROM.read(sizeof(config)-1) == CONFIG_VERSION) {
+    for (uint8_t t=0; t<sizeof(config); t++) {
+      *((char*)&config + t) = EEPROM.read(t);
+    }
+  } else {
+    //NO VALID CONFIG FOUND SAVING
+    saveConfig();
+  }
+}
 
 
 
@@ -367,7 +405,7 @@ void findVolume(byte volumeIncrement)
     //   resetToLast(volumeIncrement-1)
     // }
   }
-  stepsToVolume[volumeIncrement] = steps;
+  config.stepsToVolume[volumeIncrement] = steps;
 }
 // *********************************************************************************************************************************
 
@@ -527,88 +565,88 @@ int machineRestrictedIERation = IE_RATIO_MAX;
 
 void handleSettings()
 {
-  // //Volume and machine specs limit BPM and IE ratio
-  // requiredVolume = getVolume();
-  // //BPM further limits IE Ratio
+//   //Volume and machine specs limit BPM and IE ratio
+//   requiredVolume = getVolume();
+//   //BPM further limits IE Ratio
 
-  // //  60000 / Max Time to Produce Volume * 2 (1:1 Ratio)
-  // //  60000 / 800mS * 2 = 60000 / 1600 = 37.5BPM
+//   //  60000 / Max Time to Produce Volume * 2 (1:1 Ratio)
+//   //  60000 / 800mS * 2 = 60000 / 1600 = 37.5BPM
 
-  // // machineRestrictedBPM = 6000 / (mapToSteps(requiredVolume)*stepTime)*2
+//   // machineRestrictedBPM = 6000 / (mapToSteps(requiredVolume)*stepTime)*2
 
-  // //DUMMYS TO SIMULATE MAX TIME TO REACH VOLUME & AMOUNT OF STEPS REQUIRED
-  // uint16_t maxTimeToReachVolume = requiredVolume; //DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY
-  // stepsForRequiredVolume = requiredVolume;  //look up steps for required Volume!!!!
+//   //DUMMYS TO SIMULATE MAX TIME TO REACH VOLUME & AMOUNT OF STEPS REQUIRED
+//   uint16_t maxTimeToReachVolume = requiredVolume; //DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY
+//   stepsForRequiredVolume = requiredVolume;  //look up steps for required Volume!!!!
 
-  // machineRestrictedBPM = 60000 / (maxTimeToReachVolume * 2);
+//   machineRestrictedBPM = 60000 / (maxTimeToReachVolume * 2);
 
-  // requiredBPM = getBreathsPerMiute(machineRestrictedBPM);
+//   requiredBPM = getBreathsPerMiute(machineRestrictedBPM);
 
-  // //Calculation examples
-  // //   mSPerBreath = 60000/requiredBPM;
-  // //   1600 = 60000/37.5
-  // // 1600 - Max Time to Produce Volume
-  // // 1600 - 800 = 800 ExpiratoryTimeRemaining
-  // // (ExpiratoryTimeRemaining / Max Time to Produce Volume)  * 100
-  // // (800.0 / 800.0) * 100 = 100 (1:1 Ratio)
+//   //Calculation examples
+//   //   mSPerBreath = 60000/requiredBPM;
+//   //   1600 = 60000/37.5
+//   // 1600 - Max Time to Produce Volume
+//   // 1600 - 800 = 800 ExpiratoryTimeRemaining
+//   // (ExpiratoryTimeRemaining / Max Time to Produce Volume)  * 100
+//   // (800.0 / 800.0) * 100 = 100 (1:1 Ratio)
 
-  // // 60000/20 = 3000
-  // // 3000 - 800 = 2200 ExpiratoryTimeRemaining
-  // // (2200.0 / 800.0) * 100 = 275 (1:2.75 Ratio)
+//   // 60000/20 = 3000
+//   // 3000 - 800 = 2200 ExpiratoryTimeRemaining
+//   // (2200.0 / 800.0) * 100 = 275 (1:2.75 Ratio)
 
-  // // 60000/40 = 1500 mSPerBreath
-  // // 1500 - 700 = 900 ExpiratoryTimeRemaining
-  // // (900 / 700) * 100 = 128 (1:1.25 Ratio)
+//   // 60000/40 = 1500 mSPerBreath
+//   // 1500 - 700 = 900 ExpiratoryTimeRemaining
+//   // (900 / 700) * 100 = 128 (1:1.25 Ratio)
 
 
-  // //mSPerBreath = Total Inspiration & Expiratory Time
-  // uint16_t mSPerBreath = 60000/requiredBPM;
-  // uint16_t expiratoryTimeRemaining = mSPerBreath-maxTimeToReachVolume;
-  // machineRestrictedIERation = ((float)expiratoryTimeRemaining / (float)maxTimeToReachVolume) * 100.0;
+//   //mSPerBreath = Total Inspiration & Expiratory Time
+//   uint16_t mSPerBreath = 60000/requiredBPM;
+//   uint16_t expiratoryTimeRemaining = mSPerBreath-maxTimeToReachVolume;
+//   machineRestrictedIERation = ((float)expiratoryTimeRemaining / (float)maxTimeToReachVolume) * 100.0;
 
-  // requiredIERatio = getIERatio(machineRestrictedIERation);
+//   requiredIERatio = getIERatio(machineRestrictedIERation);
 
-  // float mSPerRatio = ((float)mSPerBreath/(100.0+(float)requiredIERatio));
-  // calculatedInspiratoryTime = mSPerRatio * 100;
-  // //calculatedExpiratoryTime = mSPerRatio * requiredIERatio;  //Incurs rounding issues - DON'T USE
-  // calculatedExpiratoryTime = mSPerBreath - calculatedInspiratoryTime;
+//   float mSPerRatio = ((float)mSPerBreath/(100.0+(float)requiredIERatio));
+//   calculatedInspiratoryTime = mSPerRatio * 100;
+//   //calculatedExpiratoryTime = mSPerRatio * requiredIERatio;  //Incurs rounding issues - DON'T USE
+//   calculatedExpiratoryTime = mSPerBreath - calculatedInspiratoryTime;
 
-  // // Serial.println("");
-  // // Serial.print(maxTimeToReachVolume);
-  // // Serial.print(" : ");
-  // // Serial.print(mSPerBreath);
-  // // Serial.print(" : ");
-  // // Serial.print(expiratoryTimeRemaining);
-  // // Serial.print(" : ");
-  // // Serial.print(machineRestrictedIERation);
-  // // Serial.print(" : ");
-  // // Serial.print(requiredIERatio);
-  // // Serial.print(" : ");
-  // // Serial.print(mSPerRatio);
-  // // Serial.print(" : ");
-  // // Serial.print(calculatedInspiratoryTime);
-  // // Serial.print(" : ");
-  // // Serial.println(calculatedExpiratoryTime);
-  // // delay(1000);
+//   // Serial.println("");
+//   // Serial.print(maxTimeToReachVolume);
+//   // Serial.print(" : ");
+//   // Serial.print(mSPerBreath);
+//   // Serial.print(" : ");
+//   // Serial.print(expiratoryTimeRemaining);
+//   // Serial.print(" : ");
+//   // Serial.print(machineRestrictedIERation);
+//   // Serial.print(" : ");
+//   // Serial.print(requiredIERatio);
+//   // Serial.print(" : ");
+//   // Serial.print(mSPerRatio);
+//   // Serial.print(" : ");
+//   // Serial.print(calculatedInspiratoryTime);
+//   // Serial.print(" : ");
+//   // Serial.println(calculatedExpiratoryTime);
+//   // delay(1000);
 
-  // //Calculation examples
-  // // 60000/BPM = mSPerBreath
-  // // mSPerBreath / (100+requiredIERatio) = calculatedRatioTime
-  // // calculatedRatioTime * 100 = calculatedInspiratoryTime
-  // // calculatedRatioTime * requiredIERatio = calculatedExpiratoryTime
+//   //Calculation examples
+//   // 60000/BPM = mSPerBreath
+//   // mSPerBreath / (100+requiredIERatio) = calculatedRatioTime
+//   // calculatedRatioTime * 100 = calculatedInspiratoryTime
+//   // calculatedRatioTime * requiredIERatio = calculatedExpiratoryTime
 
-  // // 30 BPM @ 1:1 Ratio
-  // // 60000/30 BPM = 2000mS Per Breath
-  // // 2000/(100+100) = 10 Ratio Time
-  // // 10 * 100 = 1000 calculatedInspiratoryTime
-  // // 10 * 100 = 1000 calculatedExpiratoryTime
+//   // 30 BPM @ 1:1 Ratio
+//   // 60000/30 BPM = 2000mS Per Breath
+//   // 2000/(100+100) = 10 Ratio Time
+//   // 10 * 100 = 1000 calculatedInspiratoryTime
+//   // 10 * 100 = 1000 calculatedExpiratoryTime
 
-  // // 30 BPM @ 1:1.5 Ratio
-  // // 60000/30 BPM = 2000mS Per Breath
-  // // 2000/(100+150) = 8 Ratio Time
-  // // 8 * 100 = 800 calculatedInspiratoryTime
-  // // 8 * 150 = 1200 calculatedExpiratoryTime
-}
+//   // 30 BPM @ 1:1.5 Ratio
+//   // 60000/30 BPM = 2000mS Per Breath
+//   // 2000/(100+150) = 8 Ratio Time
+//   // 8 * 100 = 800 calculatedInspiratoryTime
+//   // 8 * 150 = 1200 calculatedExpiratoryTime
+// }
 
 void handleScreen()
 {
@@ -997,7 +1035,7 @@ void setup() {
 
   //TODO - set initial states
 
-
+  loadConfig();
   lcdInit();
   clearLCD();
   mode = WAIT;
