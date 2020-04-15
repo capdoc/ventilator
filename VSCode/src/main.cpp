@@ -646,7 +646,7 @@ void handleSettings()
 //   // 2000/(100+150) = 8 Ratio Time
 //   // 8 * 100 = 800 calculatedInspiratoryTime
 //   // 8 * 150 = 1200 calculatedExpiratoryTime
-// }
+}
 
 void handleScreen()
 {
