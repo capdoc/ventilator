@@ -68,7 +68,6 @@ uint8_t calib_index = 0;
 //boolean switchState = false;
 boolean okBtnFlag = false;
 boolean confBtnFlag = false;
-//boolean startBtnFlag = false;
 boolean lcd_dis = false;
 boolean limitActived = false;
 boolean err_flag = true;
@@ -266,18 +265,6 @@ void slowStep(int delayTime)
   delayMicroseconds(delayTime);    // Wait
   digitalWrite(STEPPER_STEP, LOW); // Output low
   delayMicroseconds(delayTime);   // Wait
-}
-
-/**********************************************************************
-* Slow step of stepper
-**********************************************************************/
-void fastStep(int delayTime)
-{
-  //Step the stepper 1 step
-  digitalWrite(STEPPER_STEP, HIGH); // Output high
-  delayMicroseconds(100);    // Wait
-  digitalWrite(STEPPER_STEP, LOW); // Output low
-  delayMicroseconds(100);    // small Wait
 }
 
 /**********************************************************************
@@ -1060,8 +1047,8 @@ void dummyBreath(){
   Serial.println(steps);
   
   //print cycle time
-  Serial.print("Time: ");
-  Serial.println(millis() - time);
+  // Serial.print("Time: ");
+  // Serial.println(millis() - time);
 }
 
 
@@ -1187,7 +1174,7 @@ void loop() {
       break;
 
 
-    //*************IGNORING for now
+
     case POT_CONFIG:
       /*
       CENTER POTENTIOMETER
@@ -1201,7 +1188,7 @@ void loop() {
 
 
 
-    //***********IGNORING for now
+
     case VOL_CONFIG:
       /*
       CALIBRATE VOLUME OF BAG
@@ -1223,10 +1210,11 @@ void loop() {
 
 
 
+
+    /*
+    CALLIBRATE ML
+    */
     case ML_CONFIG:
-      /*
-      CALLIBRATE ML
-      */
       Serial.println("ML Config Mode.");
 
       //reset arm
@@ -1292,6 +1280,10 @@ void loop() {
       break;
 
 
+
+    /*
+    READY TO START
+    */
     case READY:
       Serial.println("Ready Mode");
 
@@ -1327,6 +1319,9 @@ void loop() {
 
 
 
+    /*
+    STARTED
+    */
     case RUNNING:
      
       //breath();
@@ -1336,6 +1331,10 @@ void loop() {
 
 
 
+
+    /*
+    ERROR MODE
+    */
     case ERR:
       Serial.println("ERROR!!!!!");
 
