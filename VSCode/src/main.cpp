@@ -33,14 +33,6 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 
 // steps for upper most limit of arm
 #define BAG_UPPER_LIMIT   3600
-//max volume for breath
-#define MAX_BAG_VOLUME    1000 // = 1 Litre
-//mililitre increments to configure
-#define ML_INCREMENTS     50 // = 50 ml
-//number of array elements
-#define ML_ARRAY_INC      MAX_BAG_VOLUME/ML_INCREMENTS
-
-
 
 
 //POT CONFIG
@@ -68,14 +60,15 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 
 
 //calibration array for ml increments
-// uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS] = {0}; //850-150=700     700/50 = 14 50mL increments
-int calib_arr[ML_ARRAY_INC];
+uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS] = {0}; //850-150=700     700/50 = 14 50mL increments
+//int calib_arr[ML_ARRAY_INC];
 int calib_index = 0;
 
 // FLAGS
 //boolean switchState = false;
 boolean okBtnFlag = false;
 boolean confBtnFlag = false;
+boolean startBtnFlag = false;
 boolean lcd_dis = false;
 boolean limitActived = false;
 boolean err_flag = true;
@@ -89,10 +82,12 @@ boolean calib_done = false;
 struct configStruct {
   //ADD EVERYTHING HERE YOU WANT USERS TO BE ABLE TO CONFIGURE
   //ie VOLUME_MAX, BAG_UPPER_LIMIT, etc. 
-  uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS];
-  uint8_t version; // Placed last to verify you wrote/read correctly
+  uint16_t conf_stepsUpperLimit;
+  uint16_t conf_stepsToVolume[STEP_TO_VOLUME_INCREMENTS];
+  uint8_t conf_version; // Placed last to verify you wrote/read correctly
 } config = {
   //Set defaults
+  BAG_UPPER_LIMIT,
   {0},
   CONFIG_VERSION
 };
@@ -102,6 +97,9 @@ void saveConfig()
   for (uint8_t t=0; t<sizeof(config); t++) {
     EEPROM.write(t, *((char*)&config + t));
   }
+  Serial.println();
+  Serial.println("Config saved!");
+  Serial.println();
 }
 
 void loadConfig() 
@@ -116,6 +114,10 @@ void loadConfig()
     //NO VALID CONFIG FOUND SAVING
     saveConfig();
   }
+  Serial.println();
+  Serial.print("Config loaded version: ");
+  Serial.println(config.conf_version);
+  Serial.println();
 }
 
 
@@ -194,12 +196,10 @@ void lcdInit()
 **********************************************************************/
 int cleanRead(byte pin)
 {
-  while(true){
-    int val = analogRead(pin);
-    delay(POT_DEBOUNCE_DELAY);
-    if (val == analogRead(pin)){
-      return val;
-    }
+  int val = analogRead(pin);
+  delay(POT_DEBOUNCE_DELAY);
+  if (val == analogRead(pin)){
+    return val;
   }
 }
 
@@ -210,12 +210,8 @@ void buzzer(int ms)
 {
   Serial.println("Buzzing..");
   tone(BUZZER, 1000); // Send 1KHz sound signal...
-  delay(1000);        // ...for 1 sec
-  noTone(BUZZER);     // Stop sound...
-  delay(1000);        // ...for 1sec
-  //digitalWrite(BUZZER, HIGH);
-  //delay(ms);
-  //digitalWrite(BUZZER, LOW);
+  delay(ms);        // ...for 1 sec
+  noTone(BUZZER);     // Stop sound..
 }
 
 
@@ -268,10 +264,9 @@ void slowStep(int delayTime)
 void handleBTN()
 {
   // Debounce config button return false
-  if (digitalRead(CONFIG_BTN_PIN) == LOW) {
+  if (digitalRead(CONFIG_BTN_PIN) == LOW) { //<<<< High
     delay(BTN_DEBOUNCE_DELAY);
     if (digitalRead(CONFIG_BTN_PIN) == LOW) {
-      //Serial.println(confState);
       confBtnFlag = true;
     }
   }
@@ -280,8 +275,15 @@ void handleBTN()
   if (digitalRead(OK_BTN_PIN) == LOW) {
     delay(BTN_DEBOUNCE_DELAY);
     if (digitalRead(OK_BTN_PIN) == LOW) {
-      //Serial.println(okState);
       okBtnFlag = true;
+    }
+  }
+
+  // Debounce ok button return true
+  if (digitalRead(START_BTN_PIN) == HIGH) {
+    delay(BTN_DEBOUNCE_DELAY);
+    if (digitalRead(START_BTN_PIN) == HIGH) {
+      startBtnFlag = true;
     }
   }
 }
@@ -344,7 +346,7 @@ void zeroArm() {
   steps = 0;
   // Move arm to upper limit
   digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
-  while(steps < BAG_UPPER_LIMIT) {
+  while(steps < stepsUpperLimit) {
     slowStep(200);
     steps++;
   }
@@ -405,7 +407,7 @@ void findVolume(byte volumeIncrement)
     //   resetToLast(volumeIncrement-1)
     // }
   }
-  config.stepsToVolume[volumeIncrement] = steps;
+  config.conf_stepsToVolume[volumeIncrement] = steps;
 }
 // *********************************************************************************************************************************
 
@@ -796,7 +798,7 @@ void volConfig() {
   digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
   // Only inflate to upper limit as hardcoded
   Serial.println(okBtnFlag);
-  while (steps < BAG_UPPER_LIMIT && !okBtnFlag) {
+  while (steps < BAG_UPPER_LIMIT && !okBtnFlag) { //must be BAG_UPPER_LIMIT, not stepsUpperLimit
     slowStep(400);
     steps++;
     handleBTN();
@@ -807,6 +809,8 @@ void volConfig() {
 
   //set the NEW UPPER LIMIT
   stepsUpperLimit = steps;
+
+  //TODO - write upper limit to EEPROM?
 
 
   // Ok has been hit, check if retest is needed or proceed.
@@ -914,7 +918,7 @@ void mlConfig(){
       newVol = cleanRead(VOLUME_POT);
 
       //compare the values
-      if (newVol > currentVol) {
+      if (newVol > currentVol + 5) {
         //Serial.println("Greater >>>>>");
         //Serial.print("New pot val: ");
         //Serial.println(newVol);
@@ -970,14 +974,14 @@ void mlConfig(){
       Serial.println("SAVING!");
 
       //save the step marker to array
-      calib_arr[calib_index] = (int)steps;
+      stepsToVolume[calib_index] = (int)steps;
       //increment index for
       calib_index++;
 
       //view array
-      for (int i = 0; i < ML_ARRAY_INC; i++){
+      for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
         //show the value for each
-        Serial.print(calib_arr[i]);
+        Serial.print(stepsToVolume[i]);
         Serial.print(" ,");
       }
 
@@ -993,7 +997,7 @@ void mlConfig(){
     }
 
     //raise flag if we are at the end of the array
-    if(calib_index == ML_ARRAY_INC){
+    if(calib_index == STEP_TO_VOLUME_INCREMENTS){
       //calibration finished
       calib_done = true;
       //display next message
@@ -1107,11 +1111,24 @@ void loop() {
         standbyScreen();
       }
       // Wait for user input
-      //bool val =
       handleBTN();
+
+      //Config button pressed, go to config
       if (confBtnFlag) {
         confBtnFlag = false;
-        mode = ML_CONFIG;
+
+        //set config sequece start mode
+        //should be 'POT_CONFIG'
+        //skipping for now
+        mode = POT_CONFIG;
+      }
+
+      //if OK pressed, go to start    <<<<<<<<START PRESSED
+      if (startBtnFlag){
+        startBtnFlag = false;
+
+        //RUNNING mode, begin breathing
+        mode = RUNNING;
       }
 
       break;
@@ -1139,14 +1156,14 @@ void loop() {
       Serial.println("Volume Config Mode");
       volConfig();
       // Recalibrate bag volume if config pressed
-      if (confBtnFlag) {
-        confBtnFlag = false;
+      if (okBtnFlag) {
+        okBtnFlag = false;
         limitActived = false;
         mode = ML_CONFIG;
       }
       // Ok to proceed
-      if (okBtnFlag) {
-        okBtnFlag = false;
+      if (confBtnFlag) {
+        confBtnFlag = false;
       }
       Serial.println("volume conf finished");
       break;
@@ -1165,8 +1182,8 @@ void loop() {
 
       Serial.println("Resetting volume array.....");
       //reset volume increment array
-      for (int i = 0; i < ML_ARRAY_INC; i++){
-        calib_arr[i] = (int)0;
+      for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
+        stepsToVolume[i] = (int)0;
         //Serial.println(i);
       }
 
@@ -1200,11 +1217,23 @@ void loop() {
           confBtnFlag = false;
 
           //return to last valid increment
-          resetToLast(calib_arr[calib_index-1]);
+          resetToLast(stepsToVolume[calib_index-1]);
         }
 
         //DONT KNOW WHY THIS IS HERE, but it needs to be...
         limitActived = false;
+      }
+
+      //Check calibration complete
+      if (calib_done){
+        //set config
+        config.conf_stepsUpperLimit = BAG_UPPER_LIMIT;
+        for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
+          config.conf_stepsToVolume[i] = stepsToVolume[i];
+        }
+
+        //save to EEPROM
+        saveConfig();
       }
 
       break;
@@ -1232,9 +1261,9 @@ void loop() {
 
       Serial.print("Array values: ");
       //display the increment array
-      for (int i = 0; i < ML_ARRAY_INC; i++){
+      for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
         //show the value for each
-        Serial.print(calib_arr[i]);
+        Serial.print(stepsToVolume[i]);
         Serial.print(" ,");
       }
       Serial.println();
@@ -1247,9 +1276,31 @@ void loop() {
 
 
     case RUNNING:
-      Serial.println("Running Mode");
 
+      Serial.println("Running Mode");
+            
       //breath();
+
+      // Wait for user input
+      handleBTN();
+
+      //Config button pressed, go to config
+      if (confBtnFlag) {
+        confBtnFlag = false;
+
+        //TODO - confirm message??
+
+        //change mode back to reset start
+        mode = RESET_ARM;
+      }
+
+      if (startBtnFlag){
+        startBtnFlag = false;
+
+        //stop breathing???
+
+      }
+
 
       break;
 
