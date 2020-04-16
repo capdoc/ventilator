@@ -85,7 +85,12 @@ struct configStruct {
   uint16_t stepsUpperLimit;
   uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS];
   uint8_t version; // Placed last to verify you wrote/read correctly
-} config ;
+} config = {
+  //Set defaults
+  BAG_UPPER_LIMIT,
+  {0},
+  CONFIG_VERSION
+};
 
 void saveConfig() 
 {
@@ -1228,7 +1233,7 @@ void loop() {
       //Check calibration complete
       if (calib_done){
         //set config
-
+        
         config.stepsUpperLimit = BAG_UPPER_LIMIT;
         for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
           config.stepsToVolume[i] = stepsToVolume[i];
