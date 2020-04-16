@@ -82,15 +82,10 @@ boolean calib_done = false;
 struct configStruct {
   //ADD EVERYTHING HERE YOU WANT USERS TO BE ABLE TO CONFIGURE
   //ie VOLUME_MAX, BAG_UPPER_LIMIT, etc. 
-  uint16_t conf_stepsUpperLimit;
-  uint16_t conf_stepsToVolume[STEP_TO_VOLUME_INCREMENTS];
-  uint8_t conf_version; // Placed last to verify you wrote/read correctly
-} config = {
-  //Set defaults
-  BAG_UPPER_LIMIT,
-  {0},
-  CONFIG_VERSION
-};
+  uint16_t stepsUpperLimit;
+  uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS];
+  uint8_t version; // Placed last to verify you wrote/read correctly
+} config ;
 
 void saveConfig() 
 {
@@ -116,7 +111,9 @@ void loadConfig()
   }
   Serial.println();
   Serial.print("Config loaded version: ");
-  Serial.println(config.conf_version);
+  Serial.println(config.version);
+  Serial.print("Config upper limit: ");
+  Serial.println(config.stepsUpperLimit);
   Serial.println();
 }
 
@@ -279,8 +276,10 @@ void handleBTN()
     }
   }
 
-  // Debounce ok button return true
-  if (digitalRead(START_BTN_PIN) == HIGH) {
+  //not sure START should be on interrupt??
+
+  // Debounce start button return true
+  if (digitalRead(START_BTN_PIN) == HIGH) { // <<<< HIGH activated
     delay(BTN_DEBOUNCE_DELAY);
     if (digitalRead(START_BTN_PIN) == HIGH) {
       startBtnFlag = true;
@@ -407,7 +406,7 @@ void findVolume(byte volumeIncrement)
     //   resetToLast(volumeIncrement-1)
     // }
   }
-  config.conf_stepsToVolume[volumeIncrement] = steps;
+  config.stepsToVolume[volumeIncrement] = steps;
 }
 // *********************************************************************************************************************************
 
@@ -1042,6 +1041,8 @@ void setup() {
   loadConfig();
   lcdInit();
   clearLCD();
+
+  //start mode
   mode = WAIT;
 }
 
@@ -1227,9 +1228,10 @@ void loop() {
       //Check calibration complete
       if (calib_done){
         //set config
-        config.conf_stepsUpperLimit = BAG_UPPER_LIMIT;
+
+        config.stepsUpperLimit = BAG_UPPER_LIMIT;
         for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
-          config.conf_stepsToVolume[i] = stepsToVolume[i];
+          config.stepsToVolume[i] = stepsToVolume[i];
         }
 
         //save to EEPROM
@@ -1255,7 +1257,6 @@ void loop() {
         lcd.print(F("Press START to start."));
 
         //reset calibration flag = CAREFUL!!
-        //calib_done = false;
         lcd_dis = false;
       }
 
