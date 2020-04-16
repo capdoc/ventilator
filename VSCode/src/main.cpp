@@ -60,7 +60,7 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 
 
 //calibration array for ml increments
-uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS] = {0}; //850-150=700     700/50 = 14 50mL increments
+//uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS] = {0}; //850-150=700     700/50 = 14 50mL increments
 //int calib_arr[ML_ARRAY_INC];
 int calib_index = 0;
 
@@ -107,13 +107,23 @@ void loadConfig()
   // To make sure there are settings, and they are YOURS!
   // If nothing is found it will use the default settings.
   if (EEPROM.read(sizeof(config)-1) == CONFIG_VERSION) {
+    Serial.print("Config size: ");
+    Serial.println(sizeof(config));
     for (uint8_t t=0; t<sizeof(config); t++) {
       *((char*)&config + t) = EEPROM.read(t);
+      Serial.println(EEPROM.read(t));
     }
+
+    //assign the values to the running variables
+    
+
   } else {
     //NO VALID CONFIG FOUND SAVING
     saveConfig();
   }
+
+  
+
   Serial.println();
   Serial.print("Config loaded version: ");
   Serial.println(config.version);
@@ -127,8 +137,8 @@ void loadConfig()
 volatile boolean startEnabled = false;
 volatile unsigned long lastStartPress = 0;
 
-int steps = BAG_UPPER_LIMIT;              // Current Postion of Stepper Motor
-int stepsUpperLimit = BAG_UPPER_LIMIT; // Upper Limit of Stepper Motor <= should be configured and stored in EEPROM -- 3600 full bag but weight of arm limits at 3500 about 20ml compression under weight of arm, some slack on string.
+uint16_t steps = BAG_UPPER_LIMIT;              // Current Postion of Stepper Motor
+//int stepsUpperLimit = BAG_UPPER_LIMIT; // Upper Limit of Stepper Motor <= should be configured and stored in EEPROM -- 3600 full bag but weight of arm limits at 3500 about 20ml compression under weight of arm, some slack on string.
 byte setupState = 0;        // State to store calibration and setup
 boolean lockEnabled = false;
 
@@ -350,12 +360,12 @@ void zeroArm() {
   steps = 0;
   // Move arm to upper limit
   digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
-  while(steps < stepsUpperLimit) {
+  while(steps < config.stepsUpperLimit) {
     slowStep(200);
     steps++;
   }
   Serial.print("MAX STEPS: ");
-  Serial.println(steps);
+  Serial.println(config.stepsUpperLimit);
   digitalWrite(STEPPER_ENABLE, LOW);
 
   //small buzz
@@ -479,7 +489,7 @@ void handleCalibrate()
           lcd.print(F("Set Max Inf. of Bag"));
         }
         digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
-        while(steps <= stepsUpperLimit) {
+        while(steps <= config.stepsUpperLimit) {
           slowStep(400);
           steps++;
         }
@@ -708,7 +718,7 @@ void breath()
     if(startEnabled == false) return; //EXIT IF START IS DISABLED
   }
   digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
-  while(steps < stepsUpperLimit){
+  while(steps < config.stepsUpperLimit){
     slowStep(calculatedExpiratoryTime / stepsForRequiredVolume);
     steps++;
     if(startEnabled == false) return; //EXIT IF START IS DISABLED
@@ -812,7 +822,7 @@ void volConfig() {
   digitalWrite(STEPPER_ENABLE, LOW);
 
   //set the NEW UPPER LIMIT
-  stepsUpperLimit = steps;
+  config.stepsUpperLimit = steps;
 
   //TODO - write upper limit to EEPROM?
 
@@ -978,14 +988,14 @@ void mlConfig(){
       Serial.println("SAVING!");
 
       //save the step marker to array
-      stepsToVolume[calib_index] = (int)steps;
+      config.stepsToVolume[calib_index] = (int)steps;
       //increment index for
       calib_index++;
 
       //view array
       for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
         //show the value for each
-        Serial.print(stepsToVolume[i]);
+        Serial.print(config.stepsToVolume[i]);
         Serial.print(" ,");
       }
 
@@ -1189,7 +1199,7 @@ void loop() {
       Serial.println("Resetting volume array.....");
       //reset volume increment array
       for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
-        stepsToVolume[i] = (int)0;
+        config.stepsToVolume[i] = (int)0;
         //Serial.println(i);
       }
 
@@ -1223,7 +1233,7 @@ void loop() {
           confBtnFlag = false;
 
           //return to last valid increment
-          resetToLast(stepsToVolume[calib_index-1]);
+          resetToLast(config.stepsToVolume[calib_index-1]);
         }
 
         //DONT KNOW WHY THIS IS HERE, but it needs to be...
@@ -1234,10 +1244,9 @@ void loop() {
       if (calib_done){
         //set config
         
-        config.stepsUpperLimit = BAG_UPPER_LIMIT;
-        for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
-          config.stepsToVolume[i] = stepsToVolume[i];
-        }
+        // for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
+        //   config.stepsToVolume[i] = stepsToVolume[i];
+        // }
 
         //save to EEPROM
         saveConfig();
@@ -1269,7 +1278,7 @@ void loop() {
       //display the increment array
       for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
         //show the value for each
-        Serial.print(stepsToVolume[i]);
+        Serial.print(config.stepsToVolume[i]);
         Serial.print(" ,");
       }
       Serial.println();
