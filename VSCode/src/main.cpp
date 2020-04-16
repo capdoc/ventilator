@@ -57,6 +57,9 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 #define IE_RATIO_MIN 100
 #define IE_RATIO_MAX 500
 
+// Always give your config an id, useful to debug and when config layout changes
+#define CONFIG_VERSION 1
+
 
 //calibration index 
 uint8_t calib_index = 0;
@@ -65,16 +68,39 @@ uint8_t calib_index = 0;
 //boolean switchState = false;
 boolean okBtnFlag = false;
 boolean confBtnFlag = false;
-boolean startBtnFlag = false;
+//boolean startBtnFlag = false;
 boolean lcd_dis = false;
 boolean limitActived = false;
 boolean err_flag = true;
 boolean calib_done = false;
 
-//*******************************EEPROM CONFIG EDIT************************************
-// Always give your config an id, useful to debug and when config layout changes
-#define CONFIG_VERSION 1
+//Start button flag and timer
+volatile boolean startEnabled = false;
+volatile unsigned long lastStartPress = 0;
 
+uint16_t steps = BAG_UPPER_LIMIT;              // Current Postion of Stepper Motor
+byte setupState = 0;        // State to store calibration and setup
+boolean lockEnabled = false;
+
+
+
+// OPERATING MODES
+enum MODE {
+  WAIT,
+  RESET_ARM,
+  STANDBY,
+  POT_CONFIG,
+  VOL_CONFIG,
+  ML_CONFIG,
+  READY,
+  RUNNING,
+  ERR
+};
+
+MODE mode;
+
+
+//*******************************EEPROM CONFIG EDIT************************************
 //EEPROM STRUCT
 struct configStruct {
   //ADD EVERYTHING HERE YOU WANT USERS TO BE ABLE TO CONFIGURE
@@ -109,6 +135,7 @@ void loadConfig()
     }
 
     //assign the values to the running variables
+    //should be able to read from config struct members?
     
 
   } else {
@@ -125,32 +152,6 @@ void loadConfig()
 }
 
 
-
-volatile boolean startEnabled = false;
-volatile unsigned long lastStartPress = 0;
-
-uint16_t steps = BAG_UPPER_LIMIT;              // Current Postion of Stepper Motor
-byte setupState = 0;        // State to store calibration and setup
-boolean lockEnabled = false;
-
-
-
-// OPERATING MODES
-enum MODE {
-  WAIT,
-  RESET_ARM,
-  STANDBY,
-  POT_CONFIG,
-  VOL_CONFIG,
-  ML_CONFIG,
-  READY,
-  RUNNING,
-  ERR
-};
-
-MODE mode;
-
-
 /**********************************************************************
 ####################### ISR's ####################################
 **********************************************************************/
@@ -162,22 +163,29 @@ void limitTriggered_ISR()
 }
 
 // ISR TO ENABLE/DISABLE MACHINE
-// volatile boolean startEnabled = false;
-// volatile unsigned long lastStartPress = 0;
-// void startTriggered_ISR()
-// {
-//   unsigned long timeNow = millis();
-//   if(timeNow - lastStartPress > 100) {
-//     startEnabled = !startEnabled;
-//     digitalWrite(START_LED_PIN, startEnabled);
-//     lastStartPress = timeNow;
-//     if (startEnabled) {
-//       mode = RUNNING;
-//     } else {
-//       mode = RESET_ARM;
-//     }
-//   }
-// }
+void startTriggered_ISR()
+{
+  unsigned long timeNow = millis();
+  if(timeNow - lastStartPress > 1000) {
+    startEnabled = !startEnabled;
+    Serial.print("Start?: ");
+    Serial.println(startEnabled);
+    digitalWrite(START_LED_PIN, startEnabled);
+    digitalWrite(STEPPER_ENABLE, startEnabled);
+    //starting
+    if (startEnabled) {
+      if (mode == READY || mode == STANDBY){
+        mode = RUNNING;
+      } else {
+        return;
+      }
+    //stopping
+    } else {
+      mode = RESET_ARM;
+    }
+  }
+  lastStartPress = timeNow;
+}
 
 
 /**********************************************************************
@@ -261,6 +269,18 @@ void slowStep(int delayTime)
 }
 
 /**********************************************************************
+* Slow step of stepper
+**********************************************************************/
+void fastStep(int delayTime)
+{
+  //Step the stepper 1 step
+  digitalWrite(STEPPER_STEP, HIGH); // Output high
+  delayMicroseconds(100);    // Wait
+  digitalWrite(STEPPER_STEP, LOW); // Output low
+  delayMicroseconds(100);    // small Wait
+}
+
+/**********************************************************************
 * Handle any Button Presses - with Debounce
 **********************************************************************/
 
@@ -279,16 +299,6 @@ void handleBTN()
     delay(BTN_DEBOUNCE_DELAY);
     if (digitalRead(OK_BTN_PIN) == LOW) {
       okBtnFlag = true;
-    }
-  }
-
-  //not sure START should be on interrupt??
-
-  // Debounce start button return true
-  if (digitalRead(START_BTN_PIN) == HIGH) { // <<<< HIGH activated
-    delay(BTN_DEBOUNCE_DELAY);
-    if (digitalRead(START_BTN_PIN) == HIGH) {
-      startBtnFlag = true;
     }
   }
 }
@@ -367,7 +377,7 @@ void zeroArm() {
 /**********************************************************************
 * Set arm to last known VALID calibration position
 **********************************************************************/
-void resetToLast(int lastGoodVolume)
+void resetToLast(uint16_t lastGoodVolume)
 {
   //first zero arm
   zeroArm();
@@ -1022,6 +1032,39 @@ void mlConfig(){
 }
 
 
+//#################### DUMMY ##########
+//testing spped and capacity
+
+void dummyBreath(){
+  //cycle timer
+  int time = millis();
+  
+  // Move arm down 
+  digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
+  for (uint16_t i = (uint16_t)0; i < config.stepsUpperLimit - 50; i++)  { //volume level
+    slowStep(120);
+    steps--;
+  }
+  delay(10); //Inspiratory pause
+
+  // Move arm to upper limit
+  digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
+  while(steps < config.stepsUpperLimit) {
+    slowStep(120);
+    steps++;
+  }
+  delay(10); //Expiratory pause
+
+  //check we are not loosing steps (slipping)
+  Serial.print("STEPS AT ORIGIN: ");
+  Serial.println(steps);
+  
+  //print cycle time
+  Serial.print("Time: ");
+  Serial.println(millis() - time);
+}
+
+
 
 
 /**********************************************************************
@@ -1030,25 +1073,36 @@ void mlConfig(){
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
+  //inputs
   pinMode(OK_BTN_PIN, INPUT_PULLUP);
   pinMode(CONFIG_BTN_PIN, INPUT_PULLUP);
+  pinMode(LIMIT_SWITCH_PIN, INPUT_PULLUP);
+  pinMode(START_BTN_PIN, INPUT_PULLUP);
+
+  //ISRs
+  attachInterrupt(digitalPinToInterrupt(LIMIT_SWITCH_PIN), limitTriggered_ISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(START_BTN_PIN), startTriggered_ISR, FALLING);
+
+  //outputs
   pinMode(STEPPER_STEP, OUTPUT);
   pinMode(STEPPER_DIR, OUTPUT);
   pinMode(STEPPER_ENABLE, OUTPUT);
-  pinMode(LIMIT_SWITCH_PIN, INPUT_PULLUP);
-  pinMode(START_BTN_PIN, INPUT_PULLUP);
   pinMode(START_LED_PIN, OUTPUT);
   pinMode(BUZZER, OUTPUT);
-  attachInterrupt(digitalPinToInterrupt(LIMIT_SWITCH_PIN), limitTriggered_ISR, FALLING);
-  //attachInterrupt(digitalPinToInterrupt(START_BTN_PIN), startTriggered_ISR, FALLING);
 
-  //TODO - set initial states
-
+  //Initial states
+  digitalWrite(STEPPER_STEP, LOW);
+  digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
+  digitalWrite(STEPPER_ENABLE, LOW);
+  digitalWrite(START_LED_PIN, LOW);
+  digitalWrite(BUZZER, LOW);
+  
+  //initialise
   loadConfig();
   lcdInit();
   clearLCD();
 
-  //start mode
+  //Waiting mode
   mode = WAIT;
 }
 
@@ -1128,14 +1182,6 @@ void loop() {
         //should be 'POT_CONFIG'
         //skipping for now
         mode = POT_CONFIG;
-      }
-
-      //if OK pressed, go to start    <<<<<<<<START PRESSED
-      if (startBtnFlag){
-        startBtnFlag = false;
-
-        //RUNNING mode, begin breathing
-        mode = RUNNING;
       }
 
       break;
@@ -1282,31 +1328,9 @@ void loop() {
 
 
     case RUNNING:
-
-      Serial.println("Running Mode");
-            
+     
       //breath();
-
-      // Wait for user input
-      handleBTN();
-
-      //Config button pressed, go to config
-      if (confBtnFlag) {
-        confBtnFlag = false;
-
-        //TODO - confirm message??
-
-        //change mode back to reset start
-        mode = RESET_ARM;
-      }
-
-      if (startBtnFlag){
-        startBtnFlag = false;
-
-        //stop breathing???
-
-      }
-
+      dummyBreath();
 
       break;
 
@@ -1329,5 +1353,5 @@ void loop() {
       Serial.println("default");
   }
 
-  //delay(100);
+
 }
