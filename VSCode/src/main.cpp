@@ -167,8 +167,6 @@ void startTriggered_ISR()
   unsigned long timeNow = millis();
   if(timeNow - lastStartPress > 1000) {
     startEnabled = !startEnabled;
-    Serial.print("Start?: ");
-    Serial.println(startEnabled);
     digitalWrite(START_LED_PIN, startEnabled);
     digitalWrite(STEPPER_ENABLE, startEnabled);
     //starting
