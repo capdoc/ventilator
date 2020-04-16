@@ -39,7 +39,6 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 #define VOLUME_POT              A0  // Amount to compress the AmbuBag 50ml -1L
 #define BREATHS_PER_MIN_POT     A1  // Duty cycle 6-30 per minute
 #define IE_RATION_POT           A2  // Ratio of Inspiratory to Expiratory time
-// #define INSPIRATORY_TIME_POT    A3  // Tweak Inspiratory time, ie time to compress bag
 
 //debounce for button
 #define BTN_DEBOUNCE_DELAY 20
@@ -59,10 +58,8 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 #define IE_RATIO_MAX 500
 
 
-//calibration array for ml increments
-//uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS] = {0}; //850-150=700     700/50 = 14 50mL increments
-//int calib_arr[ML_ARRAY_INC];
-int calib_index = 0;
+//calibration index 
+uint8_t calib_index = 0;
 
 // FLAGS
 //boolean switchState = false;
@@ -107,11 +104,8 @@ void loadConfig()
   // To make sure there are settings, and they are YOURS!
   // If nothing is found it will use the default settings.
   if (EEPROM.read(sizeof(config)-1) == CONFIG_VERSION) {
-    Serial.print("Config size: ");
-    Serial.println(sizeof(config));
     for (uint8_t t=0; t<sizeof(config); t++) {
       *((char*)&config + t) = EEPROM.read(t);
-      Serial.println(EEPROM.read(t));
     }
 
     //assign the values to the running variables
@@ -121,8 +115,6 @@ void loadConfig()
     //NO VALID CONFIG FOUND SAVING
     saveConfig();
   }
-
-  
 
   Serial.println();
   Serial.print("Config loaded version: ");
@@ -138,7 +130,6 @@ volatile boolean startEnabled = false;
 volatile unsigned long lastStartPress = 0;
 
 uint16_t steps = BAG_UPPER_LIMIT;              // Current Postion of Stepper Motor
-//int stepsUpperLimit = BAG_UPPER_LIMIT; // Upper Limit of Stepper Motor <= should be configured and stored in EEPROM -- 3600 full bag but weight of arm limits at 3500 about 20ml compression under weight of arm, some slack on string.
 byte setupState = 0;        // State to store calibration and setup
 boolean lockEnabled = false;
 
