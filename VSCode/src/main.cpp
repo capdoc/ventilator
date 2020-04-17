@@ -62,16 +62,16 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 
 
 //calibration index 
-uint8_t calib_index = 0;
+uint8_t calibIndex = 0;
 
 // FLAGS
 //boolean switchState = false;
 boolean okBtnFlag = false;
 boolean confBtnFlag = false;
-boolean lcd_dis = false;
+boolean lcdDis = false;
 boolean limitActived = false;
-boolean err_flag = true;
-boolean calib_done = false;
+boolean errFlag = true;
+boolean calibDone = false;
 
 //Start button flag and timer
 volatile boolean startEnabled = false;
@@ -895,10 +895,10 @@ void mlConfig(){
   digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
 
   // Move arm down slowly using VT pot until 50ml water displaced and press ok, or limit switch hit
-  lcd_dis = true;
+  lcdDis = true;
   while (true) {
     //display message once
-    if (lcd_dis){
+    if (lcdDis){
       clearLCD();
       lcd.print(F("*** ML increments ***"));
       lcd.setCursor (0, 1);
@@ -907,10 +907,10 @@ void mlConfig(){
       lcd.print(F("is reached."));
       lcd.setCursor (0, 3);
       lcd.print(F("Press OK when done"));
-      lcd_dis = false;
+      lcdDis = false;
     }
 
-    lcd_dis = true;
+    lcdDis = true;
 
     //get the pot reading and move arm if 'OK' not pressed
     while(!okBtnFlag && !confBtnFlag){
@@ -943,21 +943,21 @@ void mlConfig(){
         //if reached the limit switch break out
         if (limitActived){
           //mode = ERR;
-          //err_flag = true;
+          //errFlag = true;
           //don't reset limit here
           break;
         }
       }
 
       // display next step message if not done
-      if (lcd_dis){
+      if (lcdDis){
         clearLCD();
         lcd.print(F("*** ML increments ***"));
         lcd.setCursor (0, 1);
         lcd.print(F("Set 50 ml increment?"));
         lcd.setCursor (0, 2);
         lcd.print(F("OK=Yes, CONF=No"));
-        lcd_dis = false;
+        lcdDis = false;
       }
 
       //handle ok pressed
@@ -974,9 +974,9 @@ void mlConfig(){
       Serial.println("SAVING!");
 
       //save the step marker to array
-      config.stepsToVolume[calib_index] = (int)steps;
+      config.stepsToVolume[calibIndex] = (int)steps;
       //increment index for
-      calib_index++;
+      calibIndex++;
 
       //view array
       for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
@@ -997,11 +997,11 @@ void mlConfig(){
     }
 
     //raise flag if we are at the end of the array
-    if(calib_index == STEP_TO_VOLUME_INCREMENTS){
+    if(calibIndex == STEP_TO_VOLUME_INCREMENTS){
       //calibration finished
-      calib_done = true;
+      calibDone = true;
       //display next message
-      lcd_dis = true;
+      lcdDis = true;
       //enter ready mode
       mode = READY;
     }
@@ -1022,7 +1022,7 @@ void mlConfig(){
 
 void dummyBreath(){
   //cycle timer
-  int time = millis();
+  //unsigned long time = millis();
   
   // Move arm down 
   digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
@@ -1142,7 +1142,7 @@ void loop() {
 
       //increment mode to next state
       mode = STANDBY;
-      lcd_dis = true;
+      lcdDis = true;
 
 
       break;
@@ -1152,8 +1152,8 @@ void loop() {
     */
     case STANDBY:
       //Serial.println("Standby Mode");
-      if (lcd_dis) {
-        lcd_dis = false;
+      if (lcdDis) {
+        lcdDis = false;
         standbyScreen();
       }
       // Wait for user input
@@ -1227,10 +1227,10 @@ void loop() {
       }
 
       //reset calibration index
-      calib_index = 0;
+      calibIndex = 0;
 
       //while limit not reached
-      while (!calib_done && !limitActived){
+      while (!calibDone && !limitActived){
 
         //first zero pot by user
         zeroPot();
@@ -1244,7 +1244,7 @@ void loop() {
 
         //break out if hit bottom and calibration incomplete
         //shouldn't happen but just in case
-        if (limitActived && !calib_done){
+        if (limitActived && !calibDone){
           Serial.println("LIMIT!!!");
           limitActived = false;
           break;
@@ -1256,7 +1256,7 @@ void loop() {
           confBtnFlag = false;
 
           //return to last valid increment
-          resetToLast(config.stepsToVolume[calib_index-1]);
+          resetToLast(config.stepsToVolume[calibIndex-1]);
         }
 
         //DONT KNOW WHY THIS IS HERE, but it needs to be...
@@ -1264,7 +1264,7 @@ void loop() {
       }
 
       //Check calibration complete
-      if (calib_done){
+      if (calibDone){
         //set config
         
         // for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
@@ -1285,7 +1285,7 @@ void loop() {
     case READY:
       Serial.println("Ready Mode");
 
-      if(lcd_dis){
+      if(lcdDis){
         //zero arm position
         zeroArm();
 
@@ -1298,7 +1298,7 @@ void loop() {
         lcd.print(F("Press START to start."));
 
         //reset calibration flag = CAREFUL!!
-        lcd_dis = false;
+        lcdDis = false;
       }
 
       Serial.print("Array values: ");
@@ -1337,9 +1337,9 @@ void loop() {
       Serial.println("ERROR!!!!!");
 
       //zero arm and wait for reset
-      if (err_flag == true){
+      if (errFlag == true){
         zeroArm();
-        err_flag = false;
+        errFlag = false;
       }
 
       break;
