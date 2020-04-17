@@ -1035,20 +1035,19 @@ void breath()
 {
   digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
   while(steps > stepsForRequiredVolume){
+    if(startEnabled == false) return; //EXIT IF START IS DISABLED
     if(!limitActived){
       slowStep(calculatedInspiratoryTime / stepsForRequiredVolume);
       steps--;
     } else {
       //ALARM!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WE SHOULD NOT HIT LIMIT
     }
-    // limitActived = false;
-    if(startEnabled == false) return; //EXIT IF START IS DISABLED
   }
   digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
   while(steps < config.stepsUpperLimit){
+    if(startEnabled == false) return; //EXIT IF START IS DISABLED
     slowStep(calculatedExpiratoryTime / stepsForRequiredVolume);
     steps++;
-    if(startEnabled == false) return; //EXIT IF START IS DISABLED
   }
 }
 
@@ -1333,8 +1332,13 @@ void loop() {
      
       breath();
       // dummyBreath();
+      if(startEnabled == false){
+        //Not sure about this part
+        mode = READY;
+      }
 
       break;
+      
 
 
 
