@@ -204,11 +204,13 @@ void lcdInit()
 **********************************************************************/
 int cleanRead(byte pin)
 {
-  int val = analogRead(pin);
-  delay(POT_DEBOUNCE_DELAY);
-  if (val == analogRead(pin)){
-    return val;
-  }
+  // int val = analogRead(pin);
+  // delay(POT_DEBOUNCE_DELAY);
+  // if (val == analogRead(pin)){
+  //   return val;
+  // }
+
+  return map(analogRead(pin), 0, 1023, 0, 511);
 }
 
 /**********************************************************************
