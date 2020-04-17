@@ -209,6 +209,7 @@ int cleanRead(byte pin)
   if (val == analogRead(pin)){
     return val;
   }
+  what do you return if not the same?
 }
 
 /**********************************************************************
@@ -225,30 +226,29 @@ void buzzer(int ms)
 
 
 //Reads the Volume Pot, maps the reading to the above limits and increments by set amount
-// uint16_t getVolume()
-// {
-//   int volumeIncrements = (VOLUME_MAX - VOLUME_MIN) / VOLUME_INCREMENTS;
-//   byte volumeReading = map(cleanRead(VOLUME_POT), 0, 1023, 0, volumeIncrements);
-//   return (volumeReading * VOLUME_INCREMENTS) + VOLUME_MIN;
-// }
-
+uint16_t getVolume()
+{
+  int volumeIncrements = (VOLUME_MAX - VOLUME_MIN) / VOLUME_INCREMENTS;
+  byte volumeReading = map(cleanRead(VOLUME_POT), 0, 1023, 0, volumeIncrements);
+  return (volumeReading * VOLUME_INCREMENTS) + VOLUME_MIN;
+}
 
 
 //Reads the BPM Pot, maps the reading to the above limits, contrains to within machines limits
-// byte getBreathsPerMiute(byte restrictedMax)
-// {
-//   byte bpm = map(cleanRead(BREATHS_PER_MIN_POT), 0, 1023, BREATHS_PER_MIN_MIN, BREATHS_PER_MIN_MAX);
-//   return constrain(bpm, BREATHS_PER_MIN_MIN, restrictedMax);
-// }
+uint8_t getBreathsPerMiute(uint8_t restrictedMax)
+{
+  uint8_t bpm = map(cleanRead(BREATHS_PER_MIN_POT), 0, 1023, BREATHS_PER_MIN_MIN, BREATHS_PER_MIN_MAX);
+  return constrain(bpm, BREATHS_PER_MIN_MIN, restrictedMax);
+}
 
 //Increments by 25 ie 1:(IE_RATIO/100)  1:1, 1:1.25 etc
 
 //Reads the I:E Pot, maps the reading to the above limits, contrains to within calculated limits
-// uint16_t getIERatio(int restrictedMax)
-// {
-//   uint16_t ie =  map(cleanRead(IE_RATION_POT), 0, 1023, IE_RATIO_MIN, IE_RATIO_MAX);
-//   return constrain(ie, IE_RATIO_MIN, restrictedMax);
-// }
+uint16_t getIERatio(uint16_t restrictedMax)
+{
+  uint16_t ie =  map(cleanRead(IE_RATION_POT), 0, 1023, IE_RATIO_MIN, IE_RATIO_MAX);
+  return constrain(ie, IE_RATIO_MIN, restrictedMax);
+}
 
 
 
@@ -554,107 +554,107 @@ void handleCalibrate()
 
 
 //POSSIBLE ROLLING AVERAGE THESE
-int requiredVolume = 0;
-int stepsForRequiredVolume = 0;
-int requiredBPM = 0;
-int requiredIERatio = 0;
-int calculatedInspiratoryTime = 0;
-int calculatedExpiratoryTime = 0;
+uint16_t requiredVolume = 0;
+uint16_t stepsForRequiredVolume = 0;
+uint16_t requiredBPM = 0;
+uint16_t requiredIERatio = 0;
+uint16_t calculatedInspiratoryTime = 0;
+uint16_t calculatedExpiratoryTime = 0;
 
-int machineRestrictedBPM = BREATHS_PER_MIN_MAX;
-int machineRestrictedIERation = IE_RATIO_MAX;
+uint16_t machineRestrictedBPM = BREATHS_PER_MIN_MAX;
+uint16_t machineRestrictedIERation = IE_RATIO_MAX;
 
 
 void handleSettings()
 {
-//   //Volume and machine specs limit BPM and IE ratio
-//   requiredVolume = getVolume();
-//   //BPM further limits IE Ratio
+  //Volume and machine specs limit BPM and IE ratio
+  requiredVolume = getVolume();
+  //BPM further limits IE Ratio
 
-//   //  60000 / Max Time to Produce Volume * 2 (1:1 Ratio)
-//   //  60000 / 800mS * 2 = 60000 / 1600 = 37.5BPM
+  //  60000 / Max Time to Produce Volume * 2 (1:1 Ratio)
+  //  60000 / 800mS * 2 = 60000 / 1600 = 37.5BPM
 
-//   // machineRestrictedBPM = 6000 / (mapToSteps(requiredVolume)*stepTime)*2
+  // machineRestrictedBPM = 6000 / (mapToSteps(requiredVolume)*stepTime)*2
 
-//   //DUMMYS TO SIMULATE MAX TIME TO REACH VOLUME & AMOUNT OF STEPS REQUIRED
-//   uint16_t maxTimeToReachVolume = requiredVolume; //DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY
-//   stepsForRequiredVolume = requiredVolume;  //look up steps for required Volume!!!!
+  //DUMMYS TO SIMULATE MAX TIME TO REACH VOLUME & AMOUNT OF STEPS REQUIRED
+  uint16_t maxTimeToReachVolume = requiredVolume; //DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY
+  stepsForRequiredVolume = requiredVolume;  //look up steps for required Volume!!!!
 
-//   machineRestrictedBPM = 60000 / (maxTimeToReachVolume * 2);
+  machineRestrictedBPM = 60000 / (maxTimeToReachVolume * 2);
 
-//   requiredBPM = getBreathsPerMiute(machineRestrictedBPM);
+  requiredBPM = getBreathsPerMiute(machineRestrictedBPM);
 
-//   //Calculation examples
-//   //   mSPerBreath = 60000/requiredBPM;
-//   //   1600 = 60000/37.5
-//   // 1600 - Max Time to Produce Volume
-//   // 1600 - 800 = 800 ExpiratoryTimeRemaining
-//   // (ExpiratoryTimeRemaining / Max Time to Produce Volume)  * 100
-//   // (800.0 / 800.0) * 100 = 100 (1:1 Ratio)
+  //Calculation examples
+  //   mSPerBreath = 60000/requiredBPM;
+  //   1600 = 60000/37.5
+  // 1600 - Max Time to Produce Volume
+  // 1600 - 800 = 800 ExpiratoryTimeRemaining
+  // (ExpiratoryTimeRemaining / Max Time to Produce Volume)  * 100
+  // (800.0 / 800.0) * 100 = 100 (1:1 Ratio)
 
-//   // 60000/20 = 3000
-//   // 3000 - 800 = 2200 ExpiratoryTimeRemaining
-//   // (2200.0 / 800.0) * 100 = 275 (1:2.75 Ratio)
+  // 60000/20 = 3000
+  // 3000 - 800 = 2200 ExpiratoryTimeRemaining
+  // (2200.0 / 800.0) * 100 = 275 (1:2.75 Ratio)
 
-//   // 60000/40 = 1500 mSPerBreath
-//   // 1500 - 700 = 900 ExpiratoryTimeRemaining
-//   // (900 / 700) * 100 = 128 (1:1.25 Ratio)
+  // 60000/40 = 1500 mSPerBreath
+  // 1500 - 700 = 900 ExpiratoryTimeRemaining
+  // (900 / 700) * 100 = 128 (1:1.25 Ratio)
 
 
-//   //mSPerBreath = Total Inspiration & Expiratory Time
-//   uint16_t mSPerBreath = 60000/requiredBPM;
-//   uint16_t expiratoryTimeRemaining = mSPerBreath-maxTimeToReachVolume;
-//   machineRestrictedIERation = ((float)expiratoryTimeRemaining / (float)maxTimeToReachVolume) * 100.0;
+  //mSPerBreath = Total Inspiration & Expiratory Time
+  uint16_t mSPerBreath = 60000/requiredBPM;
+  uint16_t expiratoryTimeRemaining = mSPerBreath-maxTimeToReachVolume;
+  machineRestrictedIERation = ((float)expiratoryTimeRemaining / (float)maxTimeToReachVolume) * 100.0;
 
-//   requiredIERatio = getIERatio(machineRestrictedIERation);
+  requiredIERatio = getIERatio(machineRestrictedIERation);
 
-//   float mSPerRatio = ((float)mSPerBreath/(100.0+(float)requiredIERatio));
-//   calculatedInspiratoryTime = mSPerRatio * 100;
-//   //calculatedExpiratoryTime = mSPerRatio * requiredIERatio;  //Incurs rounding issues - DON'T USE
-//   calculatedExpiratoryTime = mSPerBreath - calculatedInspiratoryTime;
+  float mSPerRatio = ((float)mSPerBreath/(100.0+(float)requiredIERatio));
+  calculatedInspiratoryTime = mSPerRatio * 100;
+  //calculatedExpiratoryTime = mSPerRatio * requiredIERatio;  //Incurs rounding issues - DON'T USE
+  calculatedExpiratoryTime = mSPerBreath - calculatedInspiratoryTime;
 
-//   // Serial.println("");
-//   // Serial.print(maxTimeToReachVolume);
-//   // Serial.print(" : ");
-//   // Serial.print(mSPerBreath);
-//   // Serial.print(" : ");
-//   // Serial.print(expiratoryTimeRemaining);
-//   // Serial.print(" : ");
-//   // Serial.print(machineRestrictedIERation);
-//   // Serial.print(" : ");
-//   // Serial.print(requiredIERatio);
-//   // Serial.print(" : ");
-//   // Serial.print(mSPerRatio);
-//   // Serial.print(" : ");
-//   // Serial.print(calculatedInspiratoryTime);
-//   // Serial.print(" : ");
-//   // Serial.println(calculatedExpiratoryTime);
-//   // delay(1000);
+  // Serial.println("");
+  // Serial.print(maxTimeToReachVolume);
+  // Serial.print(" : ");
+  // Serial.print(mSPerBreath);
+  // Serial.print(" : ");
+  // Serial.print(expiratoryTimeRemaining);
+  // Serial.print(" : ");
+  // Serial.print(machineRestrictedIERation);
+  // Serial.print(" : ");
+  // Serial.print(requiredIERatio);
+  // Serial.print(" : ");
+  // Serial.print(mSPerRatio);
+  // Serial.print(" : ");
+  // Serial.print(calculatedInspiratoryTime);
+  // Serial.print(" : ");
+  // Serial.println(calculatedExpiratoryTime);
+  // delay(1000);
 
-//   //Calculation examples
-//   // 60000/BPM = mSPerBreath
-//   // mSPerBreath / (100+requiredIERatio) = calculatedRatioTime
-//   // calculatedRatioTime * 100 = calculatedInspiratoryTime
-//   // calculatedRatioTime * requiredIERatio = calculatedExpiratoryTime
+  //Calculation examples
+  // 60000/BPM = mSPerBreath
+  // mSPerBreath / (100+requiredIERatio) = calculatedRatioTime
+  // calculatedRatioTime * 100 = calculatedInspiratoryTime
+  // calculatedRatioTime * requiredIERatio = calculatedExpiratoryTime
 
-//   // 30 BPM @ 1:1 Ratio
-//   // 60000/30 BPM = 2000mS Per Breath
-//   // 2000/(100+100) = 10 Ratio Time
-//   // 10 * 100 = 1000 calculatedInspiratoryTime
-//   // 10 * 100 = 1000 calculatedExpiratoryTime
+  // 30 BPM @ 1:1 Ratio
+  // 60000/30 BPM = 2000mS Per Breath
+  // 2000/(100+100) = 10 Ratio Time
+  // 10 * 100 = 1000 calculatedInspiratoryTime
+  // 10 * 100 = 1000 calculatedExpiratoryTime
 
-//   // 30 BPM @ 1:1.5 Ratio
-//   // 60000/30 BPM = 2000mS Per Breath
-//   // 2000/(100+150) = 8 Ratio Time
-//   // 8 * 100 = 800 calculatedInspiratoryTime
-//   // 8 * 150 = 1200 calculatedExpiratoryTime
+  // 30 BPM @ 1:1.5 Ratio
+  // 60000/30 BPM = 2000mS Per Breath
+  // 2000/(100+150) = 8 Ratio Time
+  // 8 * 100 = 800 calculatedInspiratoryTime
+  // 8 * 150 = 1200 calculatedExpiratoryTime
 }
 
 void handleScreen()
 {
-  static int lastVolume = 0;
-  static int lastBPM = 0;
-  static int lastIERation = 0;
+  static uint16_t lastVolume = 0;
+  static uint8_t lastBPM = 0;
+  static uint16_t lastIERation = 0;
   if(lastVolume != requiredVolume || lastBPM != requiredBPM || lastIERation != requiredIERatio){
     lcd.setCursor(1,2);
     lcd.print("VT");
@@ -691,25 +691,7 @@ void handleScreen()
   }
 }
 
-void breath()
-{
-  while(steps > stepsForRequiredVolume){
-    if(!limitActived){
-      slowStep(calculatedInspiratoryTime / stepsForRequiredVolume);
-      steps--;
-    } else {
-      //ALARM!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WE SHOULD NOT HIT LIMIT
-    }
-    limitActived = false;
-    if(startEnabled == false) return; //EXIT IF START IS DISABLED
-  }
-  digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
-  while(steps < config.stepsUpperLimit){
-    slowStep(calculatedExpiratoryTime / stepsForRequiredVolume);
-    steps++;
-    if(startEnabled == false) return; //EXIT IF START IS DISABLED
-  }
-}
+
 
 /**********************************************************************
 * STANDBY SCREEN
@@ -1049,7 +1031,26 @@ void dummyBreath(){
   // Serial.println(millis() - time);
 }
 
-
+void breath()
+{
+  digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
+  while(steps > stepsForRequiredVolume){
+    if(!limitActived){
+      slowStep(calculatedInspiratoryTime / stepsForRequiredVolume);
+      steps--;
+    } else {
+      //ALARM!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WE SHOULD NOT HIT LIMIT
+    }
+    // limitActived = false;
+    if(startEnabled == false) return; //EXIT IF START IS DISABLED
+  }
+  digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
+  while(steps < config.stepsUpperLimit){
+    slowStep(calculatedExpiratoryTime / stepsForRequiredVolume);
+    steps++;
+    if(startEnabled == false) return; //EXIT IF START IS DISABLED
+  }
+}
 
 
 /**********************************************************************
@@ -1311,19 +1312,27 @@ void loop() {
       Serial.println();
       Serial.println();
 
+    //EDIT to allow machine to run with Doctors Settings
+    //NOTE!!!! YOU WILL NOT BE ABLE TO CHANGE SETTINGS ON THE FLY DUE TO BLOCKING BUTTON READS
       delay(1000);
+      okBtnFlag = false;
+      while(okBtnFlag != true){
+        handleSettings();
+        handleScreen();
+        handleBTN();
+      }
+      okBtnFlag = false;
+      mode = RUNNING;
 
       break;
-
-
 
     /*
     STARTED
     */
     case RUNNING:
      
-      //breath();
-      dummyBreath();
+      breath();
+      // dummyBreath();
 
       break;
 
