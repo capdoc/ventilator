@@ -18,27 +18,17 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 #define START_LED_PIN      7
 #define BUZZER             8
 
-//STEPPER CONFIGS.
-
-//enable pin
+//STEPPER CONFIGS
 #define STEPPER_ENABLE     4
-//direction pin
 #define STEPPER_DIR        5
-//step pin
 #define STEPPER_STEP       6
-//arm daow direction
 #define STEPPER_DIR_DOWN   LOW
-//arm up direction
 #define STEPPER_DIR_UP     HIGH
-
-// steps for upper most limit of arm
-#define BAG_UPPER_LIMIT   3600
-
 
 //POT CONFIG
 #define VOLUME_POT              A0  // Amount to compress the AmbuBag 50ml -1L
 #define BREATHS_PER_MIN_POT     A1  // Duty cycle 6-30 per minute
-#define IE_RATION_POT           A2  // Ratio of Inspiratory to Expiratory time
+#define IE_RATIO_POT           A2  // Ratio of Inspiratory to Expiratory time
 
 //debounce for button
 #define BTN_DEBOUNCE_DELAY 20
@@ -46,6 +36,10 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 #define POT_MAX_VALUE 255 // stop jittering
 
 
+// steps for upper most limit of arm
+#define BAG_UPPER_LIMIT 3600
+
+//BREATH VARIABLES
 #define VOLUME_MIN 150
 #define VOLUME_MAX 850 //This should be entered in Calibration!!!!!****************************************
 #define VOLUME_INCREMENTS 50
@@ -54,28 +48,44 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 #define BREATHS_PER_MIN_MIN 6
 #define BREATHS_PER_MIN_MAX 40
 
+// in order to get float value between 1 and 5,
+// 100 and 500 are used then reading divided by 100 = ratio
+// e.g. 1:1.235, 1: 2.75, etc 
 #define IE_RATIO_MIN 100
-#define IE_RATIO_MAX 500
+#define IE_RATIO_MAX 500 
+
+#define INSPIRATORY_PAUSE 0
+#define EXPPIRATORY_PAUSE 0
 
 // Always give your config an id, useful to debug and when config layout changes
 #define CONFIG_VERSION 1
 
 
-//IO devices
+//IO VARIABLES
 //Postion of Stepper Motor
 uint16_t steps = BAG_UPPER_LIMIT;
-//value of volume potentiometer
-uint16_t volPotVal = 0;
-//value of BPM potentiometer
-uint16_t bpmPotVal = 0;
-//value of I/E potentiometer
-uint16_t iePotVal = 0;
+
+//previous pot readings
+uint16_t volumeLast = 0;
+uint16_t BPMLast = 0;
+uint16_t IELast = 0;
+//current pot readings
+uint16_t volumeCurrent = 0;
+uint16_t BPMCurrent = 0;
+uint16_t IECurrent = 0;
+
+//calculations
+uint16_t calcVolume = 0;
+uint16_t calcBPM = 0;
+uint16_t calcIE = 0;
+uint16_t calculatedInspiratoryTime = 0;
+uint16_t calculatedExpiratoryTime = 0;
+
 
 //calibration index 
 uint8_t calibIndex = 0;
 
 // FLAGS
-//boolean switchState = false;
 boolean okBtnFlag = false;
 boolean confBtnFlag = false;
 boolean lcdDis = false;
@@ -86,20 +96,6 @@ boolean calibDone = false;
 //Start button flag and timer
 volatile boolean startEnabled = false;
 volatile unsigned long lastStartPress = 0;
-
-
-//POSSIBLE ROLLING AVERAGE THESE
-uint16_t requiredVolume = 0;
-uint16_t stepsForRequiredVolume = 0;
-uint16_t requiredBPM = 0;
-uint16_t requiredIERatio = 0;
-uint16_t calculatedInspiratoryTime = 0;
-uint16_t calculatedExpiratoryTime = 0;
-
-uint16_t machineRestrictedBPM = BREATHS_PER_MIN_MAX;
-uint16_t machineRestrictedIERation = IE_RATIO_MAX;
-
-
 
 
 // OPERATING MODES
@@ -118,7 +114,6 @@ enum MODE {
 MODE mode;
 
 
-//*******************************EEPROM CONFIG EDIT************************************
 //EEPROM STRUCT
 struct configStruct {
   //ADD EVERYTHING HERE YOU WANT USERS TO BE ABLE TO CONFIGURE
@@ -133,41 +128,9 @@ struct configStruct {
   CONFIG_VERSION
 };
 
-void saveConfig() 
-{
-  for (uint8_t t=0; t<sizeof(config); t++) {
-    EEPROM.write(t, *((char*)&config + t));
-  }
-  Serial.println();
-  Serial.println("Config saved!");
-  Serial.println();
-}
 
-void loadConfig() 
-{
-  // To make sure there are settings, and they are YOURS!
-  // If nothing is found it will use the default settings.
-  if (EEPROM.read(sizeof(config)-1) == CONFIG_VERSION) {
-    for (uint8_t t=0; t<sizeof(config); t++) {
-      *((char*)&config + t) = EEPROM.read(t);
-    }
+//**************************************************END OF DEFINITIONS*********************************8*********************
 
-    //assign the values to the running variables
-    //should be able to read from config struct members?
-    
-
-  } else {
-    //NO VALID CONFIG FOUND SAVING
-    saveConfig();
-  }
-
-  Serial.println();
-  Serial.print("Config loaded version: ");
-  Serial.println(config.version);
-  Serial.print("Config upper limit: ");
-  Serial.println(config.stepsUpperLimit);
-  Serial.println();
-}
 
 
 /**********************************************************************
@@ -192,6 +155,7 @@ void startTriggered_ISR()
     if (startEnabled) {
       if (mode == READY || mode == STANDBY){
         mode = RUNNING;
+        lcdDis = true;
       } else {
         return;
       }
@@ -207,8 +171,10 @@ void startTriggered_ISR()
 /**********************************************************************
 ####################### FUNCTIONS ####################################
 **********************************************************************/
-//
-// Function to initialise lcd screen
+
+/**********************************************************************
+* Initialise LCD screen
+**********************************************************************/
 void lcdInit()
 {
   lcd.init();
@@ -216,6 +182,55 @@ void lcdInit()
   lcd.home ();                      // Go to the home location
 }
 
+/**********************************************************************
+* Clear lcd
+**********************************************************************/
+void clearLCD()
+{
+  lcd.setCursor (0, 0);
+  lcd.print(F("                    "));
+  lcd.print(F("                    "));
+  lcd.print(F("                    "));
+  lcd.print(F("                    "));
+  lcd.setCursor (0, 0);
+}
+
+/**********************************************************************
+* Save configuration variables to EEPROM
+**********************************************************************/
+void saveConfig() 
+{
+  for (uint8_t t=0; t<sizeof(config); t++) {
+    EEPROM.write(t, *((char*)&config + t));
+  }
+  Serial.println();
+  Serial.println("Config saved!");
+  Serial.println();
+}
+
+/**********************************************************************
+* Load configuration variables from EEPROM
+**********************************************************************/
+void loadConfig() 
+{
+  // To make sure there are settings, and they are YOURS!
+  // If nothing is found it will use the default settings.
+  if (EEPROM.read(sizeof(config)-1) == CONFIG_VERSION) {
+    for (uint8_t t=0; t<sizeof(config); t++) {
+      *((char*)&config + t) = EEPROM.read(t);
+    }
+  } else {
+    //NO VALID CONFIG FOUND SAVING
+    saveConfig();
+  }
+
+  Serial.println();
+  Serial.print("Config loaded version: ");
+  Serial.println(config.version);
+  Serial.print("Config upper limit: ");
+  Serial.println(config.stepsUpperLimit);
+  Serial.println();
+}
 
 
 /**********************************************************************
@@ -223,11 +238,6 @@ void lcdInit()
 **********************************************************************/
 int cleanRead(byte pin)
 {
-  // int val = analogRead(pin);
-  // delay(POT_DEBOUNCE_DELAY);
-  // if (val == analogRead(pin)){
-  //   return val;
-  // }
   return map(analogRead(pin), 0, 1023, 0, POT_MAX_VALUE);
 }
 
@@ -258,7 +268,6 @@ void slowStep(int delayTime)
 /**********************************************************************
 * Handle any Button Presses - with Debounce
 **********************************************************************/
-
 void handleBTN()
 {
   // Debounce config button return false
@@ -279,41 +288,29 @@ void handleBTN()
 }
 
 
-/**********************************************************************
-* Display lcd
-**********************************************************************/
-//Display Calibration date on LCD at above refresh rate
-void displayPos (int value, boolean displaySteps = false, int pos = 0)
-{
-  static unsigned long lastRefreshTime = 0;
-  unsigned long timeNow = millis();
-  if (timeNow - lastRefreshTime > REFRESH_RATE) {
-    lcd.setCursor( pos, 3 );
-    lcd.setCursor( pos, 3 );
-    lcd.print(value);
-    lcd.print(" ");
-    if(displaySteps) {
-      lcd.setCursor(15,2);
-      lcd.print("Steps");
-      lcd.setCursor( 15, 3 );
-      lcd.print(steps);
-    }
-    lastRefreshTime = timeNow;
-  }
-}
+// /**********************************************************************
+// * Display lcd
+// **********************************************************************/
+// //Display Calibration date on LCD at above refresh rate
+// void displayPos (int value, boolean displaySteps = false, int pos = 0)
+// {
+//   static unsigned long lastRefreshTime = 0;
+//   unsigned long timeNow = millis();
+//   if (timeNow - lastRefreshTime > REFRESH_RATE) {
+//     lcd.setCursor( pos, 3 );
+//     lcd.setCursor( pos, 3 );
+//     lcd.print(value);
+//     lcd.print(" ");
+//     if(displaySteps) {
+//       lcd.setCursor(15,2);
+//       lcd.print("Steps");
+//       lcd.setCursor( 15, 3 );
+//       lcd.print(steps);
+//     }
+//     lastRefreshTime = timeNow;
+//   }
+// }
 
-/**********************************************************************
-* Clear lcd
-**********************************************************************/
-void clearLCD()
-{
-  lcd.setCursor (0, 0);
-  lcd.print(F("                    "));
-  lcd.print(F("                    "));
-  lcd.print(F("                    "));
-  lcd.print(F("                    "));
-  lcd.setCursor (0, 0);
-}
 
 /**********************************************************************
 * Zero arm position
@@ -367,158 +364,46 @@ void resetToLast(uint16_t lastGoodVolume)
   }
   //digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
   digitalWrite(STEPPER_ENABLE, LOW);
-
 }
-//FUNCTION *********************************************************************************************************************************
-void findVolume(byte volumeIncrement)
-{
-  //ONLY MOVE ARM DOWN
-  digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
-  lcd.setCursor (5, 2);
-  lcd.print(F("    "));
-  lcd.setCursor (5, 2);
-  lcd.print(((volumeIncrement)*50)+VOLUME_MIN);
-  boolean notSet = true;
-  while(notSet){
-    int VT = cleanRead(VOLUME_POT);
-    if(VT < 256){
-      if(!limitActived) {
-          slowStep(500);
-          steps--;
-      }
-      limitActived = false;
-    }
 
-    // if(OK button pressed){
-    //   notSet = false;
-    // }
 
-    // if(CONFIG button pressed){
-    //   resetToLast(volumeIncrement-1)
-    // }
+/**********************************************************************
+* Method to check which (if any) pot has been adjusted
+**********************************************************************/
+bool hasBeenAdjusted(byte pin){
+  //return val
+  boolean potHasBeenAdjusted = false;
+  
+  //switch pin value
+  switch (pin)
+  {
+  case VOLUME_POT:
+    potHasBeenAdjusted = (volumeCurrent != volumeLast);
+    break;
+
+  case BREATHS_PER_MIN_POT:
+    potHasBeenAdjusted = (BPMCurrent != BPMLast);    
+    break;
+    
+  case IE_RATIO_POT:
+    potHasBeenAdjusted = (IECurrent != IELast);
+    break;
+  
+  default:
+    break;
   }
-  config.stepsToVolume[volumeIncrement] = steps;
-}
-// *********************************************************************************************************************************
 
-
-
-
-//Reads the Volume Pot, maps the reading to the above limits and increments by set amount
-uint16_t getVolume()
-{
-  // int volumeIncrements = (VOLUME_MAX - VOLUME_MIN) / VOLUME_INCREMENTS;
-  // byte volumeReading = map(cleanRead(VOLUME_POT), 0, POT_MAX_VALUE, 0, volumeIncrements); 
-  byte volumeReading = map(cleanRead(VOLUME_POT), 0, POT_MAX_VALUE, 0, STEP_TO_VOLUME_INCREMENTS);
-  return (volumeReading * VOLUME_INCREMENTS) + VOLUME_MIN;
+  //true if pot has been adjusted (Current != Last)
+  return potHasBeenAdjusted;
 }
 
 
-//Reads the BPM Pot, maps the reading to the above limits, contrains to within machines limits
-uint8_t getBreathsPerMiute(uint8_t restrictedMax)
-{
-  uint8_t bpm = map(cleanRead(BREATHS_PER_MIN_POT), 0, POT_MAX_VALUE, BREATHS_PER_MIN_MIN, BREATHS_PER_MIN_MAX);
-  return constrain(bpm, BREATHS_PER_MIN_MIN, restrictedMax);
-}
-
-//Increments by 25 ie 1:(IE_RATIO/100)  1:1, 1:1.25 etc
-
-//Reads the I:E Pot, maps the reading to the above limits, contrains to within calculated limits
-uint16_t getIERatio(uint16_t restrictedMax)
-{
-  uint16_t ie =  map(cleanRead(IE_RATION_POT), 0, POT_MAX_VALUE, IE_RATIO_MIN, IE_RATIO_MAX);
-  return constrain(ie, IE_RATIO_MIN, restrictedMax);
-}
-
-
-
-void handleSettings(byte volCurrent, byte bpmCurrent, byte ieCurrent)
-{
-  //Volume and machine specs limit BPM and IE ratio
-  requiredVolume = getVolume();
-  //BPM further limits IE Ratio
-
-  //  60000 / Max Time to Produce Volume * 2 (1:1 Ratio)
-  //  60000 / 800mS * 2 = 60000 / 1600 = 37.5BPM
-
-  // machineRestrictedBPM = 6000 / (mapToSteps(requiredVolume)*stepTime)*2
-
-  //DUMMYS TO SIMULATE MAX TIME TO REACH VOLUME & AMOUNT OF STEPS REQUIRED
-  uint16_t maxTimeToReachVolume = requiredVolume; //DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY DUMMY
-  stepsForRequiredVolume = requiredVolume;  //look up steps for required Volume!!!!
-
-  machineRestrictedBPM = 60000 / (maxTimeToReachVolume * 2);
-
-  requiredBPM = getBreathsPerMiute(machineRestrictedBPM);
-
-  //Calculation examples
-  //   mSPerBreath = 60000/requiredBPM;
-  //   1600 = 60000/37.5
-  // 1600 - Max Time to Produce Volume
-  // 1600 - 800 = 800 ExpiratoryTimeRemaining
-  // (ExpiratoryTimeRemaining / Max Time to Produce Volume)  * 100
-  // (800.0 / 800.0) * 100 = 100 (1:1 Ratio)
-
-  // 60000/20 = 3000
-  // 3000 - 800 = 2200 ExpiratoryTimeRemaining
-  // (2200.0 / 800.0) * 100 = 275 (1:2.75 Ratio)
-
-  // 60000/40 = 1500 mSPerBreath
-  // 1500 - 700 = 900 ExpiratoryTimeRemaining
-  // (900 / 700) * 100 = 128 (1:1.25 Ratio)
-
-
-  //mSPerBreath = Total Inspiration & Expiratory Time
-  uint16_t mSPerBreath = 60000/requiredBPM;
-  uint16_t expiratoryTimeRemaining = mSPerBreath-maxTimeToReachVolume;
-  machineRestrictedIERation = ((float)expiratoryTimeRemaining / (float)maxTimeToReachVolume) * 100.0;
-
-  requiredIERatio = getIERatio(machineRestrictedIERation);
-
-  float mSPerRatio = ((float)mSPerBreath/(100.0+(float)requiredIERatio));
-  calculatedInspiratoryTime = mSPerRatio * 100;
-  //calculatedExpiratoryTime = mSPerRatio * requiredIERatio;  //Incurs rounding issues - DON'T USE
-  calculatedExpiratoryTime = mSPerBreath - calculatedInspiratoryTime;
-
-  // Serial.println("");
-  // Serial.print(maxTimeToReachVolume);
-  // Serial.print(" : ");
-  // Serial.print(mSPerBreath);
-  // Serial.print(" : ");
-  // Serial.print(expiratoryTimeRemaining);
-  // Serial.print(" : ");
-  // Serial.print(machineRestrictedIERation);
-  // Serial.print(" : ");
-  // Serial.print(requiredIERatio);
-  // Serial.print(" : ");
-  // Serial.print(mSPerRatio);
-  // Serial.print(" : ");
-  // Serial.print(calculatedInspiratoryTime);
-  // Serial.print(" : ");
-  // Serial.println(calculatedExpiratoryTime);
-  // delay(1000);
-
-  //Calculation examples
-  // 60000/BPM = mSPerBreath
-  // mSPerBreath / (100+requiredIERatio) = calculatedRatioTime
-  // calculatedRatioTime * 100 = calculatedInspiratoryTime
-  // calculatedRatioTime * requiredIERatio = calculatedExpiratoryTime
-
-  // 30 BPM @ 1:1 Ratio
-  // 60000/30 BPM = 2000mS Per Breath
-  // 2000/(100+100) = 10 Ratio Time
-  // 10 * 100 = 1000 calculatedInspiratoryTime
-  // 10 * 100 = 1000 calculatedExpiratoryTime
-
-  // 30 BPM @ 1:1.5 Ratio
-  // 60000/30 BPM = 2000mS Per Breath
-  // 2000/(100+150) = 8 Ratio Time
-  // 8 * 100 = 800 calculatedInspiratoryTime
-  // 8 * 150 = 1200 calculatedExpiratoryTime
-}
-
+/**********************************************************************
+* Update VOLUME, BPM, IE, MILLISECONS screen
+**********************************************************************/
 void handleScreen()
 {
+  //if first display, update all characters
   if(lcdDis){
     //clear first
     clearLCD();
@@ -528,20 +413,20 @@ void handleScreen()
     lcd.setCursor(0,3);
     lcd.print(F("                    "));
     lcd.setCursor(0,3);
-    lcd.print(requiredVolume);
+    lcd.print(volumeCurrent);
     lcd.print("ml");
 
 
     lcd.setCursor(9,2);
     lcd.print("BPM");
     lcd.setCursor(9,3);
-    lcd.print(requiredBPM);
+    lcd.print(BPMCurrent);
 
     lcd.setCursor(16,2);
     lcd.print("I/E");
     lcd.setCursor(14,3);
     lcd.print("1:");
-    lcd.print((float)requiredIERatio/100.0);
+    lcd.print((float)IECurrent/100);
 
     lcd.setCursor(0,0);
     lcd.print("In:Ex (ml)");
@@ -553,42 +438,118 @@ void handleScreen()
     lcd.print(calculatedExpiratoryTime);
 
     lcdDis = false;
+  //otherwise only update what has changed
+  } else{
+    //Volume pot
+    if (hasBeenAdjusted(VOLUME_POT)){
+      lcd.setCursor(0,3);
+      lcd.print(volumeCurrent);
+    } 
+    //BPM pot
+    if (hasBeenAdjusted(BREATHS_PER_MIN_POT)){
+      lcd.setCursor(9,3);
+      lcd.print(BPMCurrent);
+    } 
+    //IE Ratio pot
+    if(hasBeenAdjusted(IE_RATIO_POT)){
+      lcd.setCursor(14,3);
+      lcd.print("1:");
+      lcd.print((float)IECurrent/100);
+
+      lcd.setCursor(11,0);
+      lcd.print(calculatedInspiratoryTime);
+      lcd.print(":");
+      lcd.print(calculatedExpiratoryTime);
+    }
   }
 }
 
 
 
 
+// *********************************************************************************************************************************
+
+
+
+
+
+
+void handleSettings()
+{
+  if(hasBeenAdjusted(VOLUME_POT) || hasBeenAdjusted(BREATHS_PER_MIN_POT) || hasBeenAdjusted(IE_RATIO_POT)){
+    // setting have changed
+
+
+    
+  }
+  
+}
+
+
 /**********************************************************************
-* CONFIGURATION SCREENS
+* BREATH
 **********************************************************************/
-//####################################################
-/*
-POT CONFIGURATION
-*/
-// void potConfig() {
-//   Serial.println("First Config Screen");
-//   clearLCD();
-//   lcd.print(F("***** CALIBRATE ****"));
-//   lcd.setCursor (0, 1);
-//   lcd.print(F("*** Turn VT to 0 ***"));
-//   lcd.setCursor (0, 2);
-//   lcd.print(F("Push OK to continue"));
-//   lcd.setCursor (0, 3);
-//   lcd.print(F("VT: "));
+void breath()
+{
+  
 
-//   //wait for button press
-//   while (!okBtnFlag) {
-//     displayPos(map(cleanRead(VOLUME_POT), 0, POT_MAX_VALUE, -5, 5), false, 3);
-//     handleBTN();
-//   }
-//   okBtnFlag = false;
-//   Serial.println("Vol pot centered");
-// }
+  //cycle timer
+  //unsigned long time = millis();
+  
+  // Move arm down 
+  digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
+  for (uint16_t i = (uint16_t)0; i < config.stepsUpperLimit - 50; i++)  { //volume level
+    slowStep(130);
+    steps--;
+  }
+  delay(10); //Inspiratory pause
+
+  // Move arm to upper limit
+  digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
+  while(steps < config.stepsUpperLimit) {
+    slowStep(130);
+    steps++;
+  }
+  delay(10); //Expiratory pause
+
+  //check we are not loosing steps (slipping)
+  Serial.print("STEPS AT ORIGIN: ");
+  Serial.println(steps);
+  
+  //print cycle time
+  // Serial.print("Time: ");
+  // Serial.println(millis() - time);
+  
+
+
+  // digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
+  // while(steps > stepsForRequiredVolume){
+  //   if(startEnabled == false) return; //EXIT IF START IS DISABLED
+  //   if(!limitActived){
+  //     slowStep(calculatedInspiratoryTime / stepsForRequiredVolume);
+  //     steps--;
+  //   } else {
+  //     //ALARM!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WE SHOULD NOT HIT LIMIT
+  //   }
+  // }
+  // digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
+  // while(steps < config.stepsUpperLimit){
+  //   if(startEnabled == false) return; //EXIT IF START IS DISABLED
+  //   slowStep(calculatedExpiratoryTime / stepsForRequiredVolume);
+  //   steps++;
+  // }
+}
 
 
 
-//####################################################
+
+
+/**********************************************************************
+* CONFIGURATION ROUTINES
+**********************************************************************/
+
+
+//####################################################################
 /*
 VOLUME CALIBRATION CONFIGURATION
 */
@@ -664,7 +625,7 @@ void volConfig() {
 
 
 
-//######################################################
+//####################################################################
 /*
 ZERO POTENTIOMETER
 */
@@ -711,7 +672,7 @@ void zeroVolumePot() {
 }
 
 
-//######################################################
+//####################################################################
 /*
 ML CALLIBRATE CONFIGURATION
 */
@@ -837,84 +798,10 @@ void mlConfig(){
 
   //disable stepper
   digitalWrite(STEPPER_ENABLE, LOW);
-
-
 }
 
 
-//#################### DUMMY ##########
-//testing spped and capacity
-
-void dummyBreath(){
-  //cycle timer
-  //unsigned long time = millis();
-  
-  // Move arm down 
-  digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
-  for (uint16_t i = (uint16_t)0; i < config.stepsUpperLimit - 50; i++)  { //volume level
-    slowStep(120);
-    steps--;
-  }
-  delay(10); //Inspiratory pause
-
-  // Move arm to upper limit
-  digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
-  while(steps < config.stepsUpperLimit) {
-    slowStep(120);
-    steps++;
-  }
-  delay(10); //Expiratory pause
-
-  //check we are not loosing steps (slipping)
-  Serial.print("STEPS AT ORIGIN: ");
-  Serial.println(steps);
-  
-  //print cycle time
-  // Serial.print("Time: ");
-  // Serial.println(millis() - time);
-}
-
-void breath()
-{
-  //read the 3 pot values
-  Serial.print("Potentiometer values: ");
-  byte volPotVal = cleanRead(VOLUME_POT);
-  byte bpmPotVal = cleanRead(BREATHS_PER_MIN_POT);
-  byte iePotVal = cleanRead(IE_RATION_POT);
-  Serial.print(volPotVal);
-  Serial.print(bpmPotVal);
-  Serial.println(iePotVal);
-
-  //set the global breath settings (Volume, BPM, and I/E)
-  handleSettings(volPotVal, bpmPotVal, iePotVal);
-
-  //update screen
-  handleScreen();
-
-  //check buttons
-  handleBTN();
-
-  delay(1000);
-  
-
-
-  // digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
-  // while(steps > stepsForRequiredVolume){
-  //   if(startEnabled == false) return; //EXIT IF START IS DISABLED
-  //   if(!limitActived){
-  //     slowStep(calculatedInspiratoryTime / stepsForRequiredVolume);
-  //     steps--;
-  //   } else {
-  //     //ALARM!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WE SHOULD NOT HIT LIMIT
-  //   }
-  // }
-  // digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
-  // while(steps < config.stepsUpperLimit){
-  //   if(startEnabled == false) return; //EXIT IF START IS DISABLED
-  //   slowStep(calculatedExpiratoryTime / stepsForRequiredVolume);
-  //   steps++;
-  // }
-}
+//####################################################################
 
 
 /**********************************************************************
@@ -1127,20 +1014,6 @@ void loop() {
       break;
 
 
-    
-    
-    
-    // case POT_CONFIG:
-    //   /*
-    //   CENTER POTENTIOMETER
-    //   */
-    //   Serial.println("Potentiometer Zeroing Mode");
-    //   //first config screen
-    //   potConfig();
-    //   //Manually set to zero, assume correct
-    //   mode = READY;
-    //   break;
-
 
 
 
@@ -1180,18 +1053,6 @@ void loop() {
       Serial.println();
       delay(1000);
 
-      //EDIT to allow machine to run with Doctors Settings
-      //NOTE!!!! YOU WILL NOT BE ABLE TO CHANGE SETTINGS ON THE FLY DUE TO BLOCKING BUTTON READS
-      // delay(1000);
-      // okBtnFlag = false;
-      // while(okBtnFlag != true){
-      //   handleSettings();
-      //   handleScreen();
-      //   handleBTN();
-      // }
-      // okBtnFlag = false;
-      // mode = RUNNING;
-
       break;
 
     /*
@@ -1200,10 +1061,32 @@ void loop() {
     case RUNNING:
 
       Serial.println("Running...");
+
+      //read the 3 pot values
+      Serial.print("Potentiometer values: ");
+      volumeCurrent = (map(cleanRead(VOLUME_POT), 0, POT_MAX_VALUE, 0, STEP_TO_VOLUME_INCREMENTS) * VOLUME_INCREMENTS) + VOLUME_MIN;
+      BPMCurrent = map(cleanRead(BREATHS_PER_MIN_POT), 0, POT_MAX_VALUE, BREATHS_PER_MIN_MIN, BREATHS_PER_MIN_MAX);
+      IECurrent = map(cleanRead(IE_RATIO_POT), 0, POT_MAX_VALUE, IE_RATIO_MIN, IE_RATIO_MAX);
+
+      Serial.print(volumeCurrent);
+      Serial.print(", ");
+      Serial.print(BPMCurrent);
+      Serial.print(", ");
+      Serial.println(IECurrent);
+
+      //set the global breath settings (Volume, BPM, and I/E)
+      handleSettings();
+
+      //update screen
+      handleScreen();
+
+      //check buttons
+      handleBTN();
+
+      delay(1000);
      
-      breath();
-      // dummyBreath();
-      
+      // Take one breath
+      breath();      
 
       break;
       
