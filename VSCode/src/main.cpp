@@ -42,8 +42,8 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 //BREATH VARIABLES
 #define VOLUME_MIN 150
 #define VOLUME_MAX 850 //This should be entered in Calibration!!!!!****************************************
-#define VOLUME_INCREMENTS 50
-#define STEP_TO_VOLUME_INCREMENTS (VOLUME_MAX-VOLUME_MIN)/VOLUME_INCREMENTS
+#define VOLUME_INCREMENTS 50 //ml per increment
+#define STEP_TO_VOLUME_INCREMENTS ((VOLUME_MAX - VOLUME_MIN) / VOLUME_INCREMENTS) + 1 //include min and max
 
 #define BREATHS_PER_MIN_MIN 6
 #define BREATHS_PER_MIN_MAX 40
@@ -54,8 +54,8 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 #define IE_RATIO_MIN 100
 #define IE_RATIO_MAX 500 
 
-#define INSPIRATORY_PAUSE 0
-#define EXPPIRATORY_PAUSE 0
+// #define INSPIRATORY_PAUSE 0
+// #define EXPPIRATORY_PAUSE 0
 
 // Always give your config an id, useful to debug and when config layout changes
 #define CONFIG_VERSION 1
@@ -80,6 +80,11 @@ uint16_t calcBPM = 0;
 uint16_t calcIE = 0;
 uint16_t calculatedInspiratoryTime = 0;
 uint16_t calculatedExpiratoryTime = 0;
+uint16_t stepsPerBreath = 0;
+uint16_t inspStepsPerSecond = 0;
+uint16_t expStepsPerSecond = 0;
+uint16_t inspMicroSecondsPerStep = 0;
+uint16_t expMicroSecondsPerStep = 0;
 
 
 //calibration index 
@@ -119,7 +124,7 @@ struct configStruct {
   //ADD EVERYTHING HERE YOU WANT USERS TO BE ABLE TO CONFIGURE
   //ie VOLUME_MAX, BAG_UPPER_LIMIT, etc. 
   uint16_t stepsUpperLimit;
-  uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS];
+  uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS]; //include max and min value
   uint8_t version; // Placed last to verify you wrote/read correctly
 } config = {
   //Set defaults
@@ -378,15 +383,24 @@ bool hasBeenAdjusted(byte pin){
   switch (pin)
   {
   case VOLUME_POT:
-    potHasBeenAdjusted = (volumeCurrent != volumeLast);
+    if(volumeCurrent != volumeLast){
+      potHasBeenAdjusted = true;
+      volumeLast = volumeCurrent;
+    }
     break;
 
   case BREATHS_PER_MIN_POT:
-    potHasBeenAdjusted = (BPMCurrent != BPMLast);    
+    if(BPMCurrent != BPMLast){
+      potHasBeenAdjusted = true;
+      BPMLast = BPMCurrent;
+    }
     break;
     
   case IE_RATIO_POT:
-    potHasBeenAdjusted = (IECurrent != IELast);
+    if(IECurrent != IELast){
+      potHasBeenAdjusted = true;
+      IELast = IECurrent;
+    }
     break;
   
   default:
@@ -403,6 +417,20 @@ bool hasBeenAdjusted(byte pin){
 **********************************************************************/
 void handleScreen()
 {
+  //read the 3 pot values
+  uint16_t tempVol = map(cleanRead(VOLUME_POT), 0, POT_MAX_VALUE, 0, STEP_TO_VOLUME_INCREMENTS);
+  volumeCurrent = constrain(((tempVol * VOLUME_INCREMENTS) + VOLUME_MIN), VOLUME_MIN, VOLUME_MAX);  
+  BPMCurrent = map(cleanRead(BREATHS_PER_MIN_POT), 0, POT_MAX_VALUE, BREATHS_PER_MIN_MIN, BREATHS_PER_MIN_MAX);
+  IECurrent = map(cleanRead(IE_RATIO_POT), 0, POT_MAX_VALUE, IE_RATIO_MIN, IE_RATIO_MAX);
+
+  Serial.print("Potentiometer values: ");
+  Serial.print(volumeCurrent);
+  Serial.print(", ");
+  Serial.print(BPMCurrent);
+  Serial.print(", ");
+  Serial.println(IECurrent);
+
+
   //if first display, update all characters
   if(lcdDis){
     //clear first
@@ -416,7 +444,6 @@ void handleScreen()
     lcd.print(volumeCurrent);
     lcd.print("ml");
 
-
     lcd.setCursor(9,2);
     lcd.print("BPM");
     lcd.setCursor(9,3);
@@ -429,7 +456,7 @@ void handleScreen()
     lcd.print((float)IECurrent/100);
 
     lcd.setCursor(0,0);
-    lcd.print("In:Ex (ml)");
+    lcd.print("In:Ex (ms)");
     lcd.setCursor(11,0);
     lcd.print("         ");
     lcd.setCursor(11,0);
@@ -438,29 +465,31 @@ void handleScreen()
     lcd.print(calculatedExpiratoryTime);
 
     lcdDis = false;
-  //otherwise only update what has changed
-  } else{
-    //Volume pot
-    if (hasBeenAdjusted(VOLUME_POT)){
-      lcd.setCursor(0,3);
-      lcd.print(volumeCurrent);
-    } 
-    //BPM pot
-    if (hasBeenAdjusted(BREATHS_PER_MIN_POT)){
-      lcd.setCursor(9,3);
-      lcd.print(BPMCurrent);
-    } 
-    //IE Ratio pot
-    if(hasBeenAdjusted(IE_RATIO_POT)){
-      lcd.setCursor(14,3);
-      lcd.print("1:");
-      lcd.print((float)IECurrent/100);
 
-      lcd.setCursor(11,0);
-      lcd.print(calculatedInspiratoryTime);
-      lcd.print(":");
-      lcd.print(calculatedExpiratoryTime);
-    }
+  } else { 
+    //otherwise only update the numbers
+    //Volume
+    lcd.setCursor(0,3);
+    lcd.print(volumeCurrent);
+    
+    //BPM 
+    lcd.setCursor(9,3);
+    lcd.print("  ");   // clear first
+    lcd.setCursor(9,3);
+    lcd.print(BPMCurrent);
+    
+    //IE Ratio
+    lcd.setCursor(14,3);
+    lcd.print("1:");
+    lcd.print((float)IECurrent/100);
+
+    //IE time
+    lcd.setCursor(11,0);
+    lcd.print("         "); // clear first
+    lcd.setCursor(11,0);
+    lcd.print(calculatedInspiratoryTime);
+    lcd.print(":");
+    lcd.print(calculatedExpiratoryTime);
   }
 }
 
@@ -476,11 +505,62 @@ void handleScreen()
 
 void handleSettings()
 {
-  if(hasBeenAdjusted(VOLUME_POT) || hasBeenAdjusted(BREATHS_PER_MIN_POT) || hasBeenAdjusted(IE_RATIO_POT)){
-    // setting have changed
+  if (hasBeenAdjusted(VOLUME_POT) || hasBeenAdjusted(BREATHS_PER_MIN_POT) || hasBeenAdjusted(IE_RATIO_POT)){
+    //CALCULATE - ins:exp percent
+    float inspPercent = 1.00 / (1.00 + IECurrent/100.00);
+    float expPercent = (IECurrent/100.00) / (1.00 + IECurrent/100.00);
 
+    // Serial.print("I:E = ");
+    // Serial.print(ins_percent);
+    // Serial.print(":");
+    // Serial.println(exp_percent);
 
-    
+    //CALCULATE - ms per breath
+    //(60sec / BPM) * 1000ms
+    float msPerBreath = (60.0 / BPMCurrent) * 1000;
+    Serial.print("ms per breath: ");
+    Serial.println(msPerBreath);
+
+    //CALCULATE - inspiratory/expiratory time in ms
+    calculatedInspiratoryTime = msPerBreath * inspPercent;
+    calculatedExpiratoryTime = msPerBreath * expPercent; // could be mis-calculated due to rounding?
+    // Serial.print("I:E = ");
+    // Serial.print(calculatedInspiratoryTime);
+    // Serial.print(":");
+    // Serial.println(calculatedExpiratoryTime);
+
+    //CALCULATE - steps per breath
+    uint8_t spbIndex = STEP_TO_VOLUME_INCREMENTS - ((volumeCurrent-VOLUME_MIN)/VOLUME_INCREMENTS);
+    stepsPerBreath = config.stepsToVolume[spbIndex-1];
+
+    // for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
+    //   //show the value for each
+    //   Serial.print(config.stepsToVolume[i]);
+    //   Serial.print(" ,");
+    // }
+    // Serial.print("Index: ");
+    // Serial.println(spbIndex-1);
+    Serial.print("Steps per breath: ");
+    Serial.println(stepsPerBreath);
+
+    //CALCULATE - inspiratory/expiratory steps per second
+    inspStepsPerSecond = (stepsPerBreath * 1.0 / calculatedInspiratoryTime * 1.0) * 1000;
+    expStepsPerSecond = (stepsPerBreath * 1.0 / calculatedExpiratoryTime * 1.0) * 1000;
+
+    // Serial.print("Insp steps / sec: ");
+    // Serial.println(inspStepsPerSecond);
+    // Serial.print("Exp steps / sec: ");
+    // Serial.println(expStepsPerSecond);
+
+    //inspiratory ms per step
+    inspMicroSecondsPerStep = (msPerBreath*inspPercent)/stepsPerBreath * 1000;
+    expMicroSecondsPerStep = (msPerBreath*expPercent)/stepsPerBreath * 1000;
+
+    Serial.print("Insp us / step: ");
+    Serial.println(inspMicroSecondsPerStep);
+    Serial.print("Exp us / step: ");
+    Serial.println(expMicroSecondsPerStep);
+
   }
   
 }
@@ -491,15 +571,14 @@ void handleSettings()
 **********************************************************************/
 void breath()
 {
-  
-
   //cycle timer
-  //unsigned long time = millis();
+  unsigned long time = millis();
   
   // Move arm down 
   digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
-  for (uint16_t i = (uint16_t)0; i < config.stepsUpperLimit - 50; i++)  { //volume level
-    slowStep(130);
+  //for (uint16_t i = (uint16_t)0; i < config.stepsUpperLimit - 50; i++)  { //volume level
+  while(steps > (config.stepsUpperLimit - stepsPerBreath + 50)){
+    slowStep(inspMicroSecondsPerStep/2);
     steps--;
   }
   delay(10); //Inspiratory pause
@@ -507,7 +586,7 @@ void breath()
   // Move arm to upper limit
   digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
   while(steps < config.stepsUpperLimit) {
-    slowStep(130);
+    slowStep(expMicroSecondsPerStep/2);
     steps++;
   }
   delay(10); //Expiratory pause
@@ -517,8 +596,8 @@ void breath()
   Serial.println(steps);
   
   //print cycle time
-  // Serial.print("Time: ");
-  // Serial.println(millis() - time);
+  Serial.print("Time: ");
+  Serial.println(millis() - time);
   
 
 
@@ -975,6 +1054,11 @@ void loop() {
       }
       //reset calibration index
       calibIndex = 0;
+
+      //add the first value to the array
+      config.stepsToVolume[0] = config.stepsUpperLimit;
+      calibIndex++;
+
       //while limit not reached
       while (!calibDone && !limitActived){
         //first zero pot by user
@@ -1062,19 +1146,8 @@ void loop() {
 
       Serial.println("Running...");
 
-      //read the 3 pot values
-      Serial.print("Potentiometer values: ");
-      volumeCurrent = (map(cleanRead(VOLUME_POT), 0, POT_MAX_VALUE, 0, STEP_TO_VOLUME_INCREMENTS) * VOLUME_INCREMENTS) + VOLUME_MIN;
-      BPMCurrent = map(cleanRead(BREATHS_PER_MIN_POT), 0, POT_MAX_VALUE, BREATHS_PER_MIN_MIN, BREATHS_PER_MIN_MAX);
-      IECurrent = map(cleanRead(IE_RATIO_POT), 0, POT_MAX_VALUE, IE_RATIO_MIN, IE_RATIO_MAX);
-
-      Serial.print(volumeCurrent);
-      Serial.print(", ");
-      Serial.print(BPMCurrent);
-      Serial.print(", ");
-      Serial.println(IECurrent);
-
       //set the global breath settings (Volume, BPM, and I/E)
+      // NOTE: pot values read and updated here
       handleSettings();
 
       //update screen
