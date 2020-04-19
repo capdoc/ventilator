@@ -53,7 +53,7 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 #define IE_RATIO_MIN 100
 #define IE_RATIO_MAX 500 
 
-#define MIN_US_PER_STEP = 200
+#define MIN_US_PER_STEP 200
 
 // #define INSPIRATORY_PAUSE 0
 // #define EXPPIRATORY_PAUSE 0
@@ -66,10 +66,6 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 //Postion of Stepper Motor
 uint16_t steps = BAG_UPPER_LIMIT;
 
-//previous pot readings
-uint16_t volumeLast = 0;
-uint16_t BPMLast = 0;
-uint16_t IELast = 0;
 //current pot readings
 uint16_t volumeCurrent = 0;
 uint16_t BPMCurrent = 0;
@@ -359,64 +355,10 @@ void resetToLast(uint16_t lastGoodVolume)
 
 
 /**********************************************************************
-* Method to check which (if any) pot has been adjusted
-**********************************************************************/
-bool hasBeenAdjusted(byte pin){
-  //return val
-  boolean potHasBeenAdjusted = false;
-  
-  //switch pin value
-  switch (pin)
-  {
-  case VOLUME_POT:
-    if(volumeCurrent != volumeLast){
-      potHasBeenAdjusted = true;
-      volumeLast = volumeCurrent;
-    }
-    break;
-
-  case BREATHS_PER_MIN_POT:
-    if(BPMCurrent != BPMLast){
-      potHasBeenAdjusted = true;
-      BPMLast = BPMCurrent;
-    }
-    break;
-    
-  case IE_RATIO_POT:
-    if(IECurrent != IELast){
-      potHasBeenAdjusted = true;
-      IELast = IECurrent;
-    }
-    break;
-  
-  default:
-    break;
-  }
-
-  //true if pot has been adjusted (Current != Last)
-  return potHasBeenAdjusted;
-}
-
-
-/**********************************************************************
 * Update VOLUME, BPM, IE, MILLISECONS screen
 **********************************************************************/
 void handleScreen()
 {
-  //read the 3 pot values
-  uint16_t tempVol = map(cleanRead(VOLUME_POT), 0, POT_MAX_VALUE, 0, STEP_TO_VOLUME_INCREMENTS);
-  volumeCurrent = constrain(((tempVol * VOLUME_INCREMENTS) + VOLUME_MIN), VOLUME_MIN, VOLUME_MAX);  
-  BPMCurrent = map(cleanRead(BREATHS_PER_MIN_POT), 0, POT_MAX_VALUE, BREATHS_PER_MIN_MIN, BREATHS_PER_MIN_MAX);
-  IECurrent = map(cleanRead(IE_RATIO_POT), 0, POT_MAX_VALUE, IE_RATIO_MIN, IE_RATIO_MAX);
-
-  Serial.print("Potentiometer values: ");
-  Serial.print(volumeCurrent);
-  Serial.print(", ");
-  Serial.print(BPMCurrent);
-  Serial.print(", ");
-  Serial.println(IECurrent);
-
-
   //if first display, update all characters
   if(lcdDis){
     //clear first
@@ -491,10 +433,24 @@ void handleScreen()
 
 void handleSettings()
 {
-  if (hasBeenAdjusted(VOLUME_POT) || hasBeenAdjusted(BREATHS_PER_MIN_POT) || hasBeenAdjusted(IE_RATIO_POT)){
+  //read the 3 pot values
+  uint16_t vol = map(cleanRead(VOLUME_POT), 0, POT_MAX_VALUE, 0, STEP_TO_VOLUME_INCREMENTS);
+  uint16_t tempVolume = constrain(((vol * VOLUME_INCREMENTS) + VOLUME_MIN), VOLUME_MIN, VOLUME_MAX);  
+  uint16_t tempBPM = map(cleanRead(BREATHS_PER_MIN_POT), 0, POT_MAX_VALUE, BREATHS_PER_MIN_MIN, BREATHS_PER_MIN_MAX);
+  uint16_t tempIE = map(cleanRead(IE_RATIO_POT), 0, POT_MAX_VALUE, IE_RATIO_MIN, IE_RATIO_MAX);
+
+  Serial.print("Potentiometer values: ");
+  Serial.print(tempVolume);
+  Serial.print(", ");
+  Serial.print(tempBPM);
+  Serial.print(", ");
+  Serial.println(tempIE);
+
+  //Recalculate if pots have changed
+  if (tempVolume != volumeCurrent || tempBPM != BPMCurrent || tempIE != IECurrent){
     //CALCULATE - ins:exp percent
-    float inspPercent = 1.00 / (1.00 + IECurrent/100.00);
-    float expPercent = (IECurrent/100.00) / (1.00 + IECurrent/100.00);
+    float inspPercent = 1.00 / (1.00 + tempIE/100.00);
+    float expPercent = (tempIE/100.00) / (1.00 + tempIE/100.00);
 
     // Serial.print("I:E = ");
     // Serial.print(ins_percent);
@@ -503,21 +459,21 @@ void handleSettings()
 
     //CALCULATE - ms per breath
     //(60sec / BPM) * 1000ms
-    float msPerBreath = (60.0 / BPMCurrent) * 1000;
+    float msPerBreath = (60.0 / tempBPM) * 1000;
     Serial.print("ms per breath: ");
     Serial.println(msPerBreath);
 
     //CALCULATE - inspiratory/expiratory time in ms
-    calculatedInspiratoryTime = msPerBreath * inspPercent;
-    calculatedExpiratoryTime = msPerBreath * expPercent; // could be mis-calculated due to rounding?
+    uint16_t tempCalculatedInspiratoryTime = msPerBreath * inspPercent;
+    uint16_t tempCalculatedExpiratoryTime = msPerBreath * expPercent; // could be mis-calculated due to rounding?
     // Serial.print("I:E = ");
     // Serial.print(calculatedInspiratoryTime);
     // Serial.print(":");
     // Serial.println(calculatedExpiratoryTime);
 
     //CALCULATE - steps per breath
-    uint8_t spbIndex = STEP_TO_VOLUME_INCREMENTS - ((volumeCurrent-VOLUME_MIN)/VOLUME_INCREMENTS);
-    stepsPerBreath = config.stepsToVolume[spbIndex-1];
+    uint8_t spbIndex = STEP_TO_VOLUME_INCREMENTS - ((tempVolume-VOLUME_MIN)/VOLUME_INCREMENTS);
+    uint16_t tempStepsPerBreath = config.stepsToVolume[spbIndex-1];
 
     // for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
     //   //show the value for each
@@ -527,11 +483,11 @@ void handleSettings()
     // Serial.print("Index: ");
     // Serial.println(spbIndex-1);
     Serial.print("Steps per breath: ");
-    Serial.println(stepsPerBreath);
+    Serial.println(tempStepsPerBreath);
 
     //CALCULATE - inspiratory/expiratory steps per second
-    inspStepsPerSecond = (stepsPerBreath * 1.0 / calculatedInspiratoryTime * 1.0) * 1000;
-    expStepsPerSecond = (stepsPerBreath * 1.0 / calculatedExpiratoryTime * 1.0) * 1000;
+    uint16_t tempInspStepsPerSecond = (tempStepsPerBreath * 1.0 / tempCalculatedInspiratoryTime * 1.0) * 1000;
+    uint16_t tempExpStepsPerSecond = (tempStepsPerBreath * 1.0 / tempCalculatedExpiratoryTime * 1.0) * 1000;
 
     // Serial.print("Insp steps / sec: ");
     // Serial.println(inspStepsPerSecond);
@@ -539,16 +495,32 @@ void handleSettings()
     // Serial.println(expStepsPerSecond);
 
     //inspiratory ms per step
-    inspMicroSecondsPerStep = (msPerBreath*inspPercent)/stepsPerBreath * 1000;
-    expMicroSecondsPerStep = (msPerBreath*expPercent)/stepsPerBreath * 1000;
+    uint16_t tempInspMicroSecondsPerStep = (msPerBreath*inspPercent)/tempStepsPerBreath * 1000;
+    uint16_t tempExpMicroSecondsPerStep = (msPerBreath*expPercent)/tempStepsPerBreath * 1000;
 
     Serial.print("Insp us / step: ");
-    Serial.println(inspMicroSecondsPerStep);
+    Serial.println(tempInspMicroSecondsPerStep);
     Serial.print("Exp us / step: ");
-    Serial.println(expMicroSecondsPerStep);
+    Serial.println(tempExpMicroSecondsPerStep);
 
+
+    //*** ONLY UPDATE VARIABLES IF MICROSECOND PER STEP > MINIMUM POSSIBLE (predefined value) *** 
+    
+    if(tempInspMicroSecondsPerStep >= MIN_US_PER_STEP && tempExpMicroSecondsPerStep >= MIN_US_PER_STEP){
+      calculatedInspiratoryTime = tempCalculatedInspiratoryTime;
+      calculatedExpiratoryTime = tempCalculatedExpiratoryTime;
+      stepsPerBreath = tempStepsPerBreath;
+      inspStepsPerSecond = tempInspStepsPerSecond;
+      expStepsPerSecond = tempExpStepsPerSecond;
+      inspMicroSecondsPerStep = tempInspMicroSecondsPerStep;
+      expMicroSecondsPerStep = tempExpMicroSecondsPerStep;
+
+      //update volume, BPM, IE to pot values
+      volumeCurrent = tempVolume;
+      BPMCurrent = tempBPM;
+      IECurrent = tempIE;
+    }
   }
-  
 }
 
 
@@ -1129,8 +1101,6 @@ void loop() {
 
       //check buttons
       handleBTN();
-
-      //delay(1000);
      
       // Take one breath
       breath();      
