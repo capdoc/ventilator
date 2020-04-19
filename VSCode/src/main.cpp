@@ -35,7 +35,6 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 //debounce for pot
 #define POT_MAX_VALUE 255 // stop jittering
 
-
 // steps for upper most limit of arm
 #define BAG_UPPER_LIMIT 3600
 
@@ -53,6 +52,8 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 // e.g. 1:1.235, 1: 2.75, etc 
 #define IE_RATIO_MIN 100
 #define IE_RATIO_MAX 500 
+
+#define MIN_US_PER_STEP = 200
 
 // #define INSPIRATORY_PAUSE 0
 // #define EXPPIRATORY_PAUSE 0
@@ -103,6 +104,21 @@ volatile boolean startEnabled = false;
 volatile unsigned long lastStartPress = 0;
 
 
+//EEPROM STRUCT
+struct configStruct {
+  //ADD EVERYTHING HERE YOU WANT USERS TO BE ABLE TO CONFIGURE
+  //ie VOLUME_MAX, BAG_UPPER_LIMIT, etc. 
+  uint16_t stepsUpperLimit;
+  uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS]; //include max and min value
+  uint8_t version; // Placed last to verify you wrote/read correctly
+} config = {
+  //Set defaults
+  BAG_UPPER_LIMIT,
+  {0},
+  CONFIG_VERSION
+};
+
+
 // OPERATING MODES
 enum MODE {
   WAIT,
@@ -119,22 +135,7 @@ enum MODE {
 MODE mode;
 
 
-//EEPROM STRUCT
-struct configStruct {
-  //ADD EVERYTHING HERE YOU WANT USERS TO BE ABLE TO CONFIGURE
-  //ie VOLUME_MAX, BAG_UPPER_LIMIT, etc. 
-  uint16_t stepsUpperLimit;
-  uint16_t stepsToVolume[STEP_TO_VOLUME_INCREMENTS]; //include max and min value
-  uint8_t version; // Placed last to verify you wrote/read correctly
-} config = {
-  //Set defaults
-  BAG_UPPER_LIMIT,
-  {0},
-  CONFIG_VERSION
-};
-
-
-//**************************************************END OF DEFINITIONS*********************************8*********************
+//**************************************************END OF DEFINITIONS*******************************************************
 
 
 
@@ -225,7 +226,16 @@ void loadConfig()
       *((char*)&config + t) = EEPROM.read(t);
     }
   } else {
-    //NO VALID CONFIG FOUND SAVING
+    //NO VALID CONFIG FOUND SAVING 
+    //add evenly spaced increments
+    for (int i = STEP_TO_VOLUME_INCREMENTS-1; i > 0; i--){
+      //for BAG_UPPER_LIMIT = 3600, STEP_TO_VOLUME_INCREMENTS = 50:
+      //increments = [3612 ,3354 ,3096 ,2838 ,2580 ,2322 ,2064 ,1806 ,1548 ,1290 ,1032 ,774 ,516 ,258]
+      config.stepsToVolume[i] = (BAG_UPPER_LIMIT / STEP_TO_VOLUME_INCREMENTS) * i;
+      //Serial.print((BAG_UPPER_LIMIT / STEP_TO_VOLUME_INCREMENTS) * i);
+      //Serial.print(" ,");
+    }
+    //save config
     saveConfig();
   }
 
@@ -291,30 +301,6 @@ void handleBTN()
     }
   }
 }
-
-
-// /**********************************************************************
-// * Display lcd
-// **********************************************************************/
-// //Display Calibration date on LCD at above refresh rate
-// void displayPos (int value, boolean displaySteps = false, int pos = 0)
-// {
-//   static unsigned long lastRefreshTime = 0;
-//   unsigned long timeNow = millis();
-//   if (timeNow - lastRefreshTime > REFRESH_RATE) {
-//     lcd.setCursor( pos, 3 );
-//     lcd.setCursor( pos, 3 );
-//     lcd.print(value);
-//     lcd.print(" ");
-//     if(displaySteps) {
-//       lcd.setCursor(15,2);
-//       lcd.print("Steps");
-//       lcd.setCursor( 15, 3 );
-//       lcd.print(steps);
-//     }
-//     lastRefreshTime = timeNow;
-//   }
-// }
 
 
 /**********************************************************************
@@ -576,10 +562,16 @@ void breath()
   
   // Move arm down 
   digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
-  //for (uint16_t i = (uint16_t)0; i < config.stepsUpperLimit - 50; i++)  { //volume level
   while(steps > (config.stepsUpperLimit - stepsPerBreath + 50)){
     slowStep(inspMicroSecondsPerStep/2);
     steps--;
+    //in case of motor slip,
+    if (limitActived){
+      limitActived = false;
+      //reset steps
+      steps = 0;
+      break;
+    }
   }
   delay(10); //Inspiratory pause
 
@@ -598,25 +590,7 @@ void breath()
   //print cycle time
   Serial.print("Time: ");
   Serial.println(millis() - time);
-  
 
-
-  // digitalWrite(STEPPER_DIR, STEPPER_DIR_DOWN);
-  // while(steps > stepsForRequiredVolume){
-  //   if(startEnabled == false) return; //EXIT IF START IS DISABLED
-  //   if(!limitActived){
-  //     slowStep(calculatedInspiratoryTime / stepsForRequiredVolume);
-  //     steps--;
-  //   } else {
-  //     //ALARM!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WE SHOULD NOT HIT LIMIT
-  //   }
-  // }
-  // digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
-  // while(steps < config.stepsUpperLimit){
-  //   if(startEnabled == false) return; //EXIT IF START IS DISABLED
-  //   slowStep(calculatedExpiratoryTime / stepsForRequiredVolume);
-  //   steps++;
-  // }
 }
 
 
@@ -668,7 +642,7 @@ void volConfig() {
   // Only inflate to upper limit as hardcoded
   Serial.println(okBtnFlag);
   while (steps < BAG_UPPER_LIMIT && !okBtnFlag) { //must be BAG_UPPER_LIMIT, not stepsUpperLimit
-    slowStep(400);
+    slowStep(800);
     steps++;
     handleBTN();
   }
@@ -1156,14 +1130,13 @@ void loop() {
       //check buttons
       handleBTN();
 
-      delay(1000);
+      //delay(1000);
      
       // Take one breath
       breath();      
 
       break;
       
-
 
 
 
