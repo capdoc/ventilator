@@ -66,7 +66,14 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 //Postion of Stepper Motor
 uint16_t steps = BAG_UPPER_LIMIT;
 
-//current pot readings
+//temporary pot readings
+uint16_t vol = 0;
+uint16_t tempVolume = 0;
+uint16_t tempBPM = 0;
+uint16_t tempIE = 0;
+
+
+//confirmed pot readings
 uint16_t volumeCurrent = 0;
 uint16_t BPMCurrent = 0;
 uint16_t IECurrent = 0;
@@ -152,23 +159,24 @@ void limitTriggered_ISR()
 void startTriggered_ISR()
 {
   unsigned long timeNow = millis();
-  if(timeNow - lastStartPress > 250) {
+  if(timeNow - lastStartPress > 250 ){//&& digitalRead(START_BTN_PIN) == LOW) {
     startEnabled = !startEnabled;
     digitalWrite(START_LED_PIN, startEnabled);
     digitalWrite(STEPPER_ENABLE, startEnabled);
     //starting
     if (startEnabled) {
+      //only start if mode == READY
       if (mode == READY){
         mode = RUNNING;
         lcdDis = true;
-      } else {
-        return;
       }
+
     //stopping
     } else {
       mode = READY;
       lcdDis = true;
     }
+    
   }
   lastStartPress = timeNow;
 }
@@ -448,10 +456,10 @@ void handleScreen()
 void handleSettings()
 {
   //read the 3 pot values
-  uint16_t vol = map(cleanRead(VOLUME_POT), 0, POT_MAX_VALUE, 0, STEP_TO_VOLUME_INCREMENTS);
-  uint16_t tempVolume = constrain(((vol * VOLUME_INCREMENTS) + VOLUME_MIN), VOLUME_MIN, VOLUME_MAX);  
-  uint16_t tempBPM = map(cleanRead(BREATHS_PER_MIN_POT), 0, POT_MAX_VALUE, BREATHS_PER_MIN_MIN, BREATHS_PER_MIN_MAX);
-  uint16_t tempIE = map(cleanRead(IE_RATIO_POT), 0, POT_MAX_VALUE, IE_RATIO_MIN, IE_RATIO_MAX);
+  vol = map(cleanRead(VOLUME_POT), 0, POT_MAX_VALUE, 0, STEP_TO_VOLUME_INCREMENTS);
+  tempVolume = constrain(((vol * VOLUME_INCREMENTS) + VOLUME_MIN), VOLUME_MIN, VOLUME_MAX);  
+  tempBPM = map(cleanRead(BREATHS_PER_MIN_POT), 0, POT_MAX_VALUE, BREATHS_PER_MIN_MIN, BREATHS_PER_MIN_MAX);
+  tempIE = map(cleanRead(IE_RATIO_POT), 0, POT_MAX_VALUE, IE_RATIO_MIN, IE_RATIO_MAX);
 
   Serial.print("Potentiometer values: ");
   Serial.print(tempVolume);
@@ -562,8 +570,8 @@ void breath()
   delay(10); //Inspiratory pause
 
   //check pots and update if needed
-  handleSettings();
-  handleScreen();
+  //handleSettings();
+  //handleScreen();
 
   // Move arm to upper limit
   digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
@@ -583,6 +591,83 @@ void breath()
 
 }
 
+
+
+/**********************************************************************
+* BREATH
+**********************************************************************/
+void setValues()
+{
+  uint16_t checkVOL = 0;
+  uint16_t checkBPM = 0;
+  uint16_t checkIE = 0;
+
+  //print message
+  //clear first
+  clearLCD();
+  lcd.print(F("****** Setting *****"));
+  lcd.setCursor(1,2);
+  lcd.print("VT");
+  lcd.setCursor(0,3);
+  lcd.print(F("                    "));
+  lcd.setCursor(0,3);
+  lcd.print(volumeCurrent);
+  lcd.print("ml");
+
+  lcd.setCursor(9,2);
+  lcd.print("BPM");
+  lcd.setCursor(9,3);
+  lcd.print(BPMCurrent);
+
+  lcd.setCursor(16,2);
+  lcd.print("I/E");
+  lcd.setCursor(14,3);
+  lcd.print("1:");
+  lcd.print((float)IECurrent/100);
+
+  while(!okBtnFlag){
+      
+    //read the 3 pot values
+    vol = map(cleanRead(VOLUME_POT), 0, POT_MAX_VALUE, 0, STEP_TO_VOLUME_INCREMENTS);
+    tempVolume = constrain(((vol * VOLUME_INCREMENTS) + VOLUME_MIN), VOLUME_MIN, VOLUME_MAX);  
+    tempBPM = map(cleanRead(BREATHS_PER_MIN_POT), 0, POT_MAX_VALUE, BREATHS_PER_MIN_MIN, BREATHS_PER_MIN_MAX);
+    tempIE = map(cleanRead(IE_RATIO_POT), 0, POT_MAX_VALUE, IE_RATIO_MIN, IE_RATIO_MAX);
+
+    
+    //update values if changed
+    if(checkVOL != tempVolume || checkBPM != tempBPM || checkIE != tempIE){
+      //Volume
+      lcd.setCursor(0,3);
+      lcd.print(tempVolume);
+      
+      //BPM 
+      lcd.setCursor(9,3);
+      lcd.print("  ");   // clear first
+      lcd.setCursor(9,3);
+      lcd.print(tempBPM);
+      
+      //IE Ratio
+      lcd.setCursor(14,3);
+      lcd.print("1:");
+      lcd.print((float)tempIE/100);
+
+      //update new variables
+      checkVOL = tempVolume;
+      checkBPM = tempBPM;
+      checkIE = tempIE;
+    }
+
+    //check btn press
+    handleBTN();
+
+  }
+  //reset flag
+  okBtnFlag = false;
+
+  //update settings
+  handleSettings();
+      
+}
 
 
 
@@ -1119,7 +1204,7 @@ void loop() {
     READY TO START
     */
     case READY:
-      Serial.println("Ready Mode");
+      //Serial.println("Ready Mode");
 
       if(lcdDis){
         //zero arm position
@@ -1136,36 +1221,53 @@ void loop() {
         lcd.print(F("Press OK to set"));
         
 
-        //reset calibration flag = CAREFUL!!
+        //reset flag
         lcdDis = false;
       }
+      
+      //this small delay is required otherwise
+      //pressing start fails
+      //TODO - find out why???
+      delay(10);
 
-      Serial.print("Array values: ");
-      //display the increment array
-      for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
-        //show the value for each
-        Serial.print(config.stepsToVolume[i]);
-        Serial.print(" ,");
+      //read buttons
+      handleBTN();
+
+      //check if OK pressed
+      if(okBtnFlag){
+        //enter user settings for volume, BPM, IE
+        mode = SET;
+        okBtnFlag = false;
       }
-      Serial.println();
-      Serial.println();
-      delay(1000);
-      // handleBTN();
-      // if (okBtnFlag){
-      //   //enter user settings for volume, BPM, IE
-      //   mode = SET;
-      // }
-
+      
       break;
 
+    
+    
     /*
-    STARTED
+    SET LEVELS REQUIRED BEFORE START
     */
     case SET:
 
       Serial.println("Setting...");
 
-         
+      //wait for values to be set
+      setValues();
+
+      //print message
+      clearLCD();
+      lcd.print(F("***** READY!! ******"));
+      lcd.setCursor (0, 1);
+      lcd.print(F("                    "));
+      lcd.setCursor (0, 2);
+      lcd.print(F("Press START to start"));
+      lcd.setCursor (0, 3);
+      lcd.print(F("Press OK to set"));
+
+      //change to run
+      mode = READY;
+
+      
 
       break;
 
@@ -1177,7 +1279,7 @@ void loop() {
     */
     case RUNNING:
 
-      Serial.println("Running...");
+      //Serial.println("Running...");
 
       //set the global breath settings (Volume, BPM, and I/E)
       // NOTE: pot values read and updated here
