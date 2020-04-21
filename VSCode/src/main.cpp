@@ -1289,6 +1289,7 @@ void loop() {
       handleScreen();
 
       //check buttons
+      //probably don't need this..
       handleBTN();
      
       // Take one breath
