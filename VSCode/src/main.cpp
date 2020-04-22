@@ -8,7 +8,8 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 //lcd refresh rate
 #define REFRESH_RATE 200
 
-#define DEBUG false
+#define DEBUG true
+#define SYS_MSG true
 
 //BUTTONS/LEDS/SWITCHES
 #define START_BTN_PIN      2
@@ -52,6 +53,8 @@ LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars
 // e.g. 1:1.235, 1: 2.75, etc 
 #define IE_RATIO_MIN 100
 #define IE_RATIO_MAX 500 
+#define IE_RATIO_INCREMENTS 25
+#define STEP_TO_IE_INCREMENTS ((IE_RATIO_MAX - IE_RATIO_MIN) / IE_RATIO_INCREMENTS) + 1 
 
 #define MIN_US_PER_STEP 200
 
@@ -68,6 +71,7 @@ uint16_t steps = BAG_UPPER_LIMIT;
 
 //temporary pot readings
 uint16_t vol = 0;
+uint16_t ie = 0;
 uint16_t tempVolume = 0;
 uint16_t tempBPM = 0;
 uint16_t tempIE = 0;
@@ -135,6 +139,7 @@ enum MODE {
   READY,
   SET,
   RUNNING,
+  STOPPING,
   ERR
 };
 
@@ -159,24 +164,35 @@ void limitTriggered_ISR()
 void startTriggered_ISR()
 {
   unsigned long timeNow = millis();
-  if(timeNow - lastStartPress > 250 ){//&& digitalRead(START_BTN_PIN) == LOW) {
-    startEnabled = !startEnabled;
-    digitalWrite(START_LED_PIN, startEnabled);
+  if(timeNow - lastStartPress > 250 ){
+    if (mode == SET) {
+      startEnabled = true;
+    } else if (mode == RUNNING) {
+      startEnabled = false;
+    }
     digitalWrite(STEPPER_ENABLE, startEnabled);
     //starting
-    if (startEnabled) {
-      //only start if mode == READY
-      if (mode == READY){
-        mode = RUNNING;
-        lcdDis = true;
+    if (startEnabled && mode == SET) {
+      //only start if mode == SET
+      if (DEBUG) {
+        Serial.println("Starting Breath");
       }
-
+      mode = RUNNING;
+      digitalWrite(START_LED_PIN, startEnabled);
     //stopping
+    } else if (mode == RUNNING) {
+      if (DEBUG) {
+        Serial.println("Stopping Breath");
+      }
+      mode = STOPPING;
+      digitalWrite(START_LED_PIN, startEnabled);
     } else {
-      mode = READY;
-      lcdDis = true;
+      if (DEBUG) {
+        Serial.println("Start button push");
+      }
+      mode = SET;
     }
-    
+    lcdDis = true;
   }
   lastStartPress = timeNow;
 }
@@ -217,9 +233,11 @@ void saveConfig()
   for (uint8_t t=0; t<sizeof(config); t++) {
     EEPROM.write(t, *((char*)&config + t));
   }
-  Serial.println();
-  Serial.println("Config saved!");
-  Serial.println();
+  if (SYS_MSG) {
+    Serial.println();
+    Serial.println("Config saved!");
+    Serial.println();
+  }
 }
 
 /**********************************************************************
@@ -248,21 +266,23 @@ void loadConfig()
     saveConfig();
   }
 
-  //print values of config after loading
-  Serial.println();
-  Serial.print("Config step to volume array: ");
-  for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
-    //for BAG_UPPER_LIMIT = 3600, STEP_TO_VOLUME_INCREMENTS = 50:
-    //increments = [3612 ,3354 ,3096 ,2838 ,2580 ,2322 ,2064 ,1806 ,1548 ,1290 ,1032 ,774 ,516 ,258]
-    Serial.print(config.stepsToVolume[i]);
-    Serial.print(", ");
+  if (SYS_MSG) {
+    //print values of config after loading
+    Serial.println();
+    Serial.print("Config step to volume array: ");
+    for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
+      //for BAG_UPPER_LIMIT = 3600, STEP_TO_VOLUME_INCREMENTS = 50:
+      //increments = [3612 ,3354 ,3096 ,2838 ,2580 ,2322 ,2064 ,1806 ,1548 ,1290 ,1032 ,774 ,516 ,258]
+      Serial.print(config.stepsToVolume[i]);
+      Serial.print(", ");
+    }
+    Serial.println();
+    Serial.print("Config loaded version: ");
+    Serial.println(config.version);
+    Serial.print("Config upper limit: ");
+    Serial.println(config.stepsUpperLimit);
+    Serial.println();
   }
-  Serial.println();
-  Serial.print("Config loaded version: ");
-  Serial.println(config.version);
-  Serial.print("Config upper limit: ");
-  Serial.println(config.stepsUpperLimit);
-  Serial.println();
 }
 
 
@@ -279,7 +299,6 @@ int cleanRead(byte pin)
 **********************************************************************/
 void buzzer(int ms)
 {
-  //Serial.println("Buzzing..");
   tone(BUZZER, 1000); // Send 1KHz sound signal...
   delay(ms);        // ...for ms duration
   noTone(BUZZER);     // Stop sound..
@@ -325,6 +344,9 @@ void handleBTN()
 * Zero arm position
 **********************************************************************/
 void zeroArm() {
+  if (DEBUG) {
+    Serial.println("Zero Arm");
+  }
   // Zero arm on power on
   clearLCD();
   lcd.print("Zeroing arm position");
@@ -346,8 +368,11 @@ void zeroArm() {
     slowStep(200);
     steps++;
   }
-  Serial.print("MAX STEPS: ");
-  Serial.println(config.stepsUpperLimit);
+
+  if (SYS_MSG) {
+    Serial.print("MAX STEPS: ");
+    Serial.println(config.stepsUpperLimit);
+  }
   digitalWrite(STEPPER_ENABLE, LOW);
 
   //small buzz
@@ -360,6 +385,9 @@ void zeroArm() {
 **********************************************************************/
 void resetToLast(uint16_t lastGoodVolume)
 {
+  if (DEBUG) {
+    Serial.println("Reset to Last");
+  }
   //first zero arm
   zeroArm();
 
@@ -381,6 +409,9 @@ void resetToLast(uint16_t lastGoodVolume)
 **********************************************************************/
 void handleScreen()
 {
+  if (DEBUG) {
+    Serial.println("Handle Screen");
+  }
   //if first display, update all characters
   if(lcdDis){
     //clear first
@@ -459,14 +490,17 @@ void handleSettings()
   vol = map(cleanRead(VOLUME_POT), 0, POT_MAX_VALUE, 0, STEP_TO_VOLUME_INCREMENTS);
   tempVolume = constrain(((vol * VOLUME_INCREMENTS) + VOLUME_MIN), VOLUME_MIN, VOLUME_MAX);  
   tempBPM = map(cleanRead(BREATHS_PER_MIN_POT), 0, POT_MAX_VALUE, BREATHS_PER_MIN_MIN, BREATHS_PER_MIN_MAX);
-  tempIE = map(cleanRead(IE_RATIO_POT), 0, POT_MAX_VALUE, IE_RATIO_MIN, IE_RATIO_MAX);
-
-  Serial.print("Potentiometer values: ");
-  Serial.print(tempVolume);
-  Serial.print(", ");
-  Serial.print(tempBPM);
-  Serial.print(", ");
-  Serial.println(tempIE);
+  ie = map(cleanRead(IE_RATIO_POT), 0, POT_MAX_VALUE, 0, STEP_TO_IE_INCREMENTS);
+  tempIE = constrain(((ie * IE_RATIO_INCREMENTS) + IE_RATIO_MIN), IE_RATIO_MIN, IE_RATIO_MAX);
+  
+  if (DEBUG) {
+    Serial.print("Potentiometer values: ");
+    Serial.print(tempVolume);
+    Serial.print(", ");
+    Serial.print(tempBPM);
+    Serial.print(", ");
+    Serial.println(tempIE);
+  }
 
   //Recalculate if pots have changed
   if (tempVolume != volumeCurrent || tempBPM != BPMCurrent || tempIE != IECurrent){
@@ -482,8 +516,10 @@ void handleSettings()
     //CALCULATE - ms per breath
     //(60sec / BPM) * 1000ms
     float msPerBreath = (60.0 / tempBPM) * 1000;
-    Serial.print("ms per breath: ");
-    Serial.println(msPerBreath);
+    if (SYS_MSG) {
+      Serial.print("ms per breath: ");
+      Serial.println(msPerBreath);
+    }
 
     //CALCULATE - inspiratory/expiratory time in ms
     uint16_t tempCalculatedInspiratoryTime = msPerBreath * inspPercent;
@@ -504,9 +540,10 @@ void handleSettings()
     // }
     // Serial.print("Index: ");
     // Serial.println(spbIndex-1);
-    Serial.print("Steps per breath: ");
-    Serial.println(tempStepsPerBreath);
-
+    if (SYS_MSG) {
+      Serial.print("Steps per breath: ");
+      Serial.println(tempStepsPerBreath);
+    }
     //CALCULATE - inspiratory/expiratory steps per second
     uint16_t tempInspStepsPerSecond = (tempStepsPerBreath * 1.0 / tempCalculatedInspiratoryTime * 1.0) * 1000;
     uint16_t tempExpStepsPerSecond = (tempStepsPerBreath * 1.0 / tempCalculatedExpiratoryTime * 1.0) * 1000;
@@ -520,11 +557,12 @@ void handleSettings()
     uint16_t tempInspMicroSecondsPerStep = (msPerBreath*inspPercent)/tempStepsPerBreath * 1000;
     uint16_t tempExpMicroSecondsPerStep = (msPerBreath*expPercent)/tempStepsPerBreath * 1000;
 
-    Serial.print("Insp us / step: ");
-    Serial.println(tempInspMicroSecondsPerStep);
-    Serial.print("Exp us / step: ");
-    Serial.println(tempExpMicroSecondsPerStep);
-
+    if (SYS_MSG) {
+      Serial.print("Insp us / step: ");
+      Serial.println(tempInspMicroSecondsPerStep);
+      Serial.print("Exp us / step: ");
+      Serial.println(tempExpMicroSecondsPerStep);
+    }
 
     //*** ONLY UPDATE VARIABLES IF MICROSECOND PER STEP > MINIMUM POSSIBLE (predefined value) *** 
     
@@ -581,23 +619,27 @@ void breath()
   }
   delay(10); //Expiratory pause
 
-  //check we are not loosing steps (slipping)
-  Serial.print("STEPS AT ORIGIN: ");
-  Serial.println(steps);
+  if (SYS_MSG) {
+    //check we are not loosing steps (slipping)
+    Serial.print("STEPS AT ORIGIN: ");
+    Serial.println(steps);
   
-  //print cycle time
-  Serial.print("Time: ");
-  Serial.println(millis() - time);
-
+    //print cycle time
+    Serial.print("Time: ");
+    Serial.println(millis() - time);
+  }
 }
 
 
 
 /**********************************************************************
-* BREATH
+* SET BREATH
 **********************************************************************/
 void setValues()
 {
+  if (DEBUG) {
+    Serial.println("Setting values");
+  }
   uint16_t checkVOL = 0;
   uint16_t checkBPM = 0;
   uint16_t checkIE = 0;
@@ -625,14 +667,14 @@ void setValues()
   lcd.print("1:");
   lcd.print((float)IECurrent/100);
 
-  while(!okBtnFlag){
+  while(!okBtnFlag && !startEnabled){
       
     //read the 3 pot values
     vol = map(cleanRead(VOLUME_POT), 0, POT_MAX_VALUE, 0, STEP_TO_VOLUME_INCREMENTS);
     tempVolume = constrain(((vol * VOLUME_INCREMENTS) + VOLUME_MIN), VOLUME_MIN, VOLUME_MAX);  
     tempBPM = map(cleanRead(BREATHS_PER_MIN_POT), 0, POT_MAX_VALUE, BREATHS_PER_MIN_MIN, BREATHS_PER_MIN_MAX);
-    tempIE = map(cleanRead(IE_RATIO_POT), 0, POT_MAX_VALUE, IE_RATIO_MIN, IE_RATIO_MAX);
-
+    ie = map(cleanRead(IE_RATIO_POT), 0, POT_MAX_VALUE, 0, STEP_TO_IE_INCREMENTS);
+    tempIE = constrain(((ie * IE_RATIO_INCREMENTS) + IE_RATIO_MIN), IE_RATIO_MIN, IE_RATIO_MAX);
     
     //update values if changed
     if(checkVOL != tempVolume || checkBPM != tempBPM || checkIE != tempIE){
@@ -663,9 +705,6 @@ void setValues()
   }
   //reset flag
   okBtnFlag = false;
-
-  //update settings
-  handleSettings();
       
 }
 
@@ -700,7 +739,9 @@ void volConfig() {
   okBtnFlag = false;
 
   // Compress bag to get 0 point
-  Serial.println(F("Compressing bag fully"));
+  if (DEBUG) {
+    Serial.println(F("Compressing bag fully"));
+  }
   clearLCD();
   lcd.print(F("**Compressing bag**"));
   lcd.setCursor (0, 3);
@@ -732,7 +773,9 @@ void volConfig() {
   lcd.print(F("fully inflated."));
   digitalWrite(STEPPER_DIR, STEPPER_DIR_UP);
   // Only inflate to upper limit as hardcoded
-  Serial.println(okBtnFlag);
+  if (DEBUG) {
+    Serial.println(okBtnFlag);
+  }
   while (steps < BAG_UPPER_LIMIT && !okBtnFlag) { //must be BAG_UPPER_LIMIT, not stepsUpperLimit
     slowStep(800);
     steps++;
@@ -776,7 +819,9 @@ ZERO POTENTIOMETER
 */
 // calibrate volume to VT pot
 void zeroVolumePot() {
-  Serial.println("Zeroing potentiometer..");
+  if (DEBUG) {
+    Serial.println("Zeroing potentiometer..");
+  }
   // Write screen
   clearLCD();
   lcd.print(F("*** ML increments ***"));
@@ -794,16 +839,20 @@ void zeroVolumePot() {
 
     //if ok pressed
     if (okBtnFlag){
-      Serial.println("WAITING for ZERO...");
+      if (DEBUG) {
+        Serial.println("WAITING for ZERO...");
+      }
       //get pot reading
       int potVal = cleanRead(VOLUME_POT);
-      Serial.print("Pot val: ");
-      Serial.println(potVal);
-
+      if (SYS_MSG) {
+        Serial.print("Pot val: ");
+        Serial.println(potVal);
+      }
       //check if pot is actually set to zero
       if (potVal == 0){
-        Serial.println("Pot at zero.");
-
+        if (DEBUG) {
+          Serial.println("Pot at zero.");
+        }
         //reset ok flag
         okBtnFlag = false;
 
@@ -906,18 +955,21 @@ void mlConfig(){
       okBtnFlag = false;
 
       //ok pressed, save array
-      Serial.println("SAVING!");
-
+      if (DEBUG) {
+        Serial.println("SAVING!");
+      }
       //save the step marker to array
       config.stepsToVolume[calibIndex] = (int)steps;
       //increment index for
       calibIndex++;
 
-      //view array
-      for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
-        //show the value for each
-        Serial.print(config.stepsToVolume[i]);
-        Serial.print(" ,");
+      if (SYS_MSG) {
+        //view array
+        for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
+          //show the value for each
+          Serial.print(config.stepsToVolume[i]);
+          Serial.print(" ,");
+        }
       }
 
     //handle 'CONF' pressed
@@ -925,7 +977,9 @@ void mlConfig(){
       // dont reset flag here!
       //confBtnFlag = false;
       //conf pressed, try again
-      Serial.println("Returning....");
+      if (DEBUG) {
+        Serial.println("Returning....");
+      }
       //disable stepper
       digitalWrite(STEPPER_ENABLE, LOW);
       //break;
@@ -1032,6 +1086,8 @@ void loop() {
     // break;
 
 
+
+
     // /*
     // RESET MODE
     // */
@@ -1049,19 +1105,24 @@ void loop() {
 
 
 
+
     /*
     STANDBY MODE
     */
     case STANDBY:
-      //Serial.println("Standby Mode");
+      
       if (lcdDis) {
+        if (DEBUG) {
+          Serial.println("Standby Mode");
+        }
         lcdDis = false;
         clearLCD();
         lcd.print(F("* Ventilator v0.90 *"));
         lcd.setCursor(0,2);
-        lcd.print(F("Press OK to begin"));
+        lcd.print(F("Press START or"));
         lcd.setCursor(0,3);
-        lcd.print(F("Press CONFIG to cal"));
+        lcd.print(F("CONFIG to calibrate"));
+        
       }
 
       // Wait for user input
@@ -1078,7 +1139,7 @@ void loop() {
       if (okBtnFlag) {
         okBtnFlag = false;
         //set ventilation mode
-        mode = READY;
+        mode = SET;
         lcdDis = true;
       }
 
@@ -1086,11 +1147,14 @@ void loop() {
 
 
 
+
     case VOL_CONFIG:
       /*
       CALIBRATE VOLUME OF BAG
       */
-      Serial.println("Volume Config Mode");
+      if (DEBUG) {
+        Serial.println("Volume Config Mode");
+      }
       volConfig();
       // Recalibrate bag volume if config pressed
       if (okBtnFlag) {
@@ -1102,7 +1166,9 @@ void loop() {
       if (confBtnFlag) {
         confBtnFlag = false;
       }
-      Serial.println("volume conf finished");
+      if (DEBUG) {
+        Serial.println("volume conf finished");
+      }
       break;
 
 
@@ -1112,7 +1178,9 @@ void loop() {
     CALLIBRATE ML
     */
     case ML_CONFIG:
-      Serial.println("ML Config Mode.");
+      if (DEBUG) {
+        Serial.println("ML Config Mode.");
+      }
       //reset arm
       //zeroArm();
       //add user message to remove calib device
@@ -1130,7 +1198,9 @@ void loop() {
 
       //reset flag
       limitActived = false;
-      Serial.println("Resetting volume array.....");
+      if (DEBUG) {
+        Serial.println("Resetting volume array.....");
+      }
       //reset volume increment array
       for (int i = 0; i < STEP_TO_VOLUME_INCREMENTS; i++){
         config.stepsToVolume[i] = (int)0;
@@ -1149,13 +1219,17 @@ void loop() {
         zeroVolumePot();
         // Ok to proceed
         okBtnFlag = false;
-        Serial.println("starting ML config");
+        if (DEBUG) {
+          Serial.println("starting ML config");
+        }
         //turn pot until 50 ml
         mlConfig();
         //break out if hit bottom and calibration incomplete
         //shouldn't happen but just in case
         if (limitActived && !calibDone){
-          Serial.println("LIMIT!!!");
+          if (DEBUG) {
+            Serial.println("LIMIT!!!");
+          }
           limitActived = false;
           break;
         }
@@ -1187,7 +1261,6 @@ void loop() {
         }
         okBtnFlag = false;
 
-
         //display next message
         lcdDis = true;
         //enter ready mode
@@ -1199,14 +1272,17 @@ void loop() {
 
 
 
-
     /*
     READY TO START
     */
     case READY:
-      //Serial.println("Ready Mode");
+      
+      if (DEBUG) {
+          Serial.println("Ready Mode");
+      }
 
       if(lcdDis){
+        
         //zero arm position
         zeroArm();
 
@@ -1243,44 +1319,38 @@ void loop() {
       break;
 
     
-    
+
+
     /*
     SET LEVELS REQUIRED BEFORE START
     */
     case SET:
-
-      Serial.println("Setting...");
-
+      if (DEBUG) {
+        Serial.println("Set mode");
+      }
+      // Zero arm
+      zeroArm();
       //wait for values to be set
-      setValues();
-
-      //print message
-      clearLCD();
-      lcd.print(F("***** READY!! ******"));
-      lcd.setCursor (0, 1);
-      lcd.print(F("                    "));
-      lcd.setCursor (0, 2);
-      lcd.print(F("Press START to start"));
-      lcd.setCursor (0, 3);
-      lcd.print(F("Press OK to set"));
-
-      //change to run
-      mode = READY;
-
+      while (!startEnabled) {
+        setValues();
+      }
       
-
+      if (startEnabled) {
+        mode = RUNNING;
+      }
+      
       break;
 
 
 
 
     /*
-    STARTED
+    STARTING BREATH
     */
     case RUNNING:
-
-      //Serial.println("Running...");
-
+      if (DEBUG) {
+        Serial.println("Running Mode");
+      }
       //set the global breath settings (Volume, BPM, and I/E)
       // NOTE: pot values read and updated here
       handleSettings();
@@ -1301,11 +1371,45 @@ void loop() {
 
 
     /*
+    STOPPNG BREATH
+    */
+    case STOPPING:
+      if (DEBUG) {
+        Serial.println("Stopping Mode");
+      }
+      // print warning message
+      if (lcdDis) {
+        clearLCD();
+        lcd.print(F("**** WARNING!! *****"));
+        lcd.setCursor (0, 1);
+        lcd.print(F("                    "));
+        lcd.setCursor (0, 2);
+        lcd.print(F("Pleae detach patient"));
+        lcd.setCursor (0, 3);
+        lcd.print(F("and press OK to cont"));
+      }
+      lcdDis = false;
+      
+      // handle ok press
+      while (!okBtnFlag) {
+        handleBTN();
+      }
+      okBtnFlag = false;
+
+      mode = SET;
+
+      break;
+    
+
+
+
+    /*
     ERROR MODE
     */
     case ERR:
-      Serial.println("ERROR!!!!!");
-
+      if (DEBUG) {
+        Serial.println("ERROR Mode");
+      }
       //zero arm and wait for reset
       if (errFlag == true){
         zeroArm();
@@ -1316,8 +1420,11 @@ void loop() {
 
 
 
+
     default:
-      Serial.println("default");
+      if (DEBUG) {
+        Serial.println("default");
+      }
   }
 
 
